@@ -16,6 +16,7 @@ export interface PlayerView {
   handCount: number;
   isTurn: boolean;
   protected: boolean;
+  seat: number;
 }
 
 export interface GameSettings {
@@ -37,6 +38,19 @@ export interface PendingView {
   options: ActionOption[];
   selectedCount?: number;
   totalCount?: number;
+  cancellable?: boolean;
+  card?: CardType;
+  expiresAt?: number;
+}
+
+export interface CardEffectEvent {
+  id: string;
+  actorId: string;
+  actorName: string;
+  card: CardType;
+  targetId?: string;
+  targetName?: string;
+  targetPublic: boolean;
 }
 
 export interface GameResult {
@@ -60,6 +74,9 @@ export interface RoomView {
   logs: { id: string; text: string; at: number }[];
   turnNumber: number;
   turnEndsAt: number | null;
+  turnDirection: "clockwise";
+  nextPlayerId: string | null;
+  firstRoundComplete: boolean;
   pending: PendingView | null;
   result: GameResult | null;
 }

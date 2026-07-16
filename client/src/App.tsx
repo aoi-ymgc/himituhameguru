@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
 import QRCode from "qrcode";
-import { CARD_DEFINITIONS, type CardType, type CharacterId } from "../../shared/cards";
-import { GAME_TITLE, type Ack, type CardView, type GameSettings, type RoomView } from "../../shared/types";
+import { CARD_CATEGORY_LABELS, CARD_DEFINITIONS, CARD_TYPES, type CardCategory, type CardType, type CharacterId } from "../../shared/cards";
+import { GAME_TITLE, type Ack, type CardEffectEvent, type CardView, type GameSettings, type RoomView } from "../../shared/types";
 import { socket } from "./main";
 
 interface SessionData { code: string; playerId: string; token: string }
-interface Notice { playerId: string; title: string; cards: CardType[]; durationMs: number }
+interface Notice { id: string; playerId: string; title: string; message?: string; cards: CardType[]; durationMs: number }
 
 const CHARACTER_NAMES: Record<CharacterId, string> = {
   sheep: "ふわっとひつじ",
@@ -25,6 +25,7 @@ const CHARACTER_ART: Record<CharacterId, string> = {
 
 const roomCodeFromPath = () => window.location.pathname.match(/^\/room\/([A-Z2-9]{6})/i)?.[1]?.toUpperCase() ?? "";
 const sessionKey = (code: string) => `himitsu-session:${code}`;
+const withSan = (name: string) => name.endsWith("さん") ? name : `${name}さん`;
 
 export default function App() {
   const [room, setRoom] = useState<RoomView | null>(null);
@@ -34,8 +35,12 @@ export default function App() {
   const [howTo, setHowTo] = useState(false);
   const [selectedCard, setSelectedCard] = useState<CardView | null>(null);
   const [privateNotice, setPrivateNotice] = useState<Notice | null>(null);
+  const [noticeQueue, setNoticeQueue] = useState<Notice[]>([]);
+  const [cutIn, setCutIn] = useState<CardEffectEvent | null>(null);
   const [soundOn, setSoundOn] = useState(() => localStorage.getItem("himitsu-sound") !== "off");
   const previousTurn = useRef<string | null>(null);
+  const roomRef = useRef<RoomView | null>(null);
+  const seenNoticeIds = useRef(new Set<string>());
 
   useEffect(() => {
     const reconnect = () => {
@@ -54,6 +59,7 @@ export default function App() {
     };
     const onState = (next: RoomView) => {
       setRoom(next);
+      roomRef.current = next;
       setBusy(false);
       setError("");
       const active = next.players.find((player) => player.isTurn)?.id ?? null;
@@ -63,9 +69,15 @@ export default function App() {
       previousTurn.current = active;
     };
     const onNotice = (notice: Notice) => {
-      setPrivateNotice(notice);
+      if (seenNoticeIds.current.has(notice.id)) return;
+      seenNoticeIds.current.add(notice.id);
+      setNoticeQueue((queue) => [...queue, notice]);
+    };
+    const onEffect = (effect: CardEffectEvent) => {
+      setCutIn(effect);
       signal(soundOn, "reveal");
-      window.setTimeout(() => setPrivateNotice((current) => current === notice ? null : current), notice.durationMs);
+      const duration = roomRef.current?.settings.animationSpeed === "fast" ? 850 : 1450;
+      window.setTimeout(() => setCutIn((current) => current?.id === effect.id ? null : current), duration);
     };
     const onKicked = (message: string) => {
       const code = roomCodeFromPath();
@@ -78,15 +90,30 @@ export default function App() {
     socket.on("connect", reconnect);
     socket.on("roomState", onState);
     socket.on("privateNotice", onNotice);
+    socket.on("cardEffect", onEffect);
     socket.on("kicked", onKicked);
     if (socket.connected) reconnect();
     return () => {
       socket.off("connect", reconnect);
       socket.off("roomState", onState);
       socket.off("privateNotice", onNotice);
+      socket.off("cardEffect", onEffect);
       socket.off("kicked", onKicked);
     };
   }, [soundOn]);
+
+  useEffect(() => {
+    if (cutIn || privateNotice || noticeQueue.length === 0) return;
+    const next = noticeQueue[0];
+    setNoticeQueue((queue) => queue.slice(1));
+    setPrivateNotice(next);
+    signal(soundOn, "reveal");
+    const timer = window.setTimeout(() => {
+      socket.emit("ackNotice", { noticeId: next.id }, () => undefined);
+      setPrivateNotice((current) => current === next ? null : current);
+    }, next.durationMs);
+    return () => window.clearTimeout(timer);
+  }, [cutIn, privateNotice, noticeQueue, soundOn]);
 
   const invoke = <T,>(event: string, payload: unknown = {}): Promise<T | undefined> => {
     setBusy(true);
@@ -131,10 +158,11 @@ export default function App() {
     <Shell soundOn={soundOn} onSound={toggleSound}>
       {error && <div className="error-banner" role="alert">{error}<button onClick={() => setError("")}>閉じる</button></div>}
       {room.status === "lobby" && <Lobby room={room} invoke={invoke} busy={busy} onHowTo={() => setHowTo(true)} />}
-      {room.status === "playing" && <Game room={room} invoke={invoke} selectedCard={selectedCard} setSelectedCard={setSelectedCard} busy={busy} />}
-      {room.status === "finished" && <Game room={room} invoke={invoke} selectedCard={null} setSelectedCard={setSelectedCard} busy={busy} />}
+      {room.status === "playing" && <Game room={room} invoke={invoke} selectedCard={selectedCard} setSelectedCard={setSelectedCard} busy={busy || Boolean(cutIn)} onHowTo={() => setHowTo(true)} />}
+      {room.status === "finished" && <Game room={room} invoke={invoke} selectedCard={null} setSelectedCard={setSelectedCard} busy={busy || Boolean(cutIn)} onHowTo={() => setHowTo(true)} />}
       {howTo && <HowToModal onClose={() => setHowTo(false)} />}
-      {privateNotice && <PrivateNotice notice={privateNotice} onClose={() => setPrivateNotice(null)} />}
+      {privateNotice && <PrivateNotice notice={privateNotice} onClose={() => { socket.emit("ackNotice", { noticeId: privateNotice.id }, () => undefined); setPrivateNotice(null); }} />}
+      {cutIn && <CardCutIn effect={cutIn} fast={room.settings.animationSpeed === "fast"} />}
     </Shell>
   );
 }
@@ -259,16 +287,21 @@ function Lobby({ room, invoke, busy, onHowTo }: { room: RoomView; invoke: <T>(ev
   );
 }
 
-function Game({ room, invoke, selectedCard, setSelectedCard, busy }: {
+function Game({ room, invoke, selectedCard, setSelectedCard, busy, onHowTo }: {
   room: RoomView;
   invoke: <T>(event: string, payload?: unknown) => Promise<T | undefined>;
   selectedCard: CardView | null;
   setSelectedCard: (card: CardView | null) => void;
   busy: boolean;
+  onHowTo: () => void;
 }) {
   const me = room.players.find((player) => player.id === room.viewerId)!;
   const current = room.players.find((player) => player.isTurn);
-  const canPlay = room.status === "playing" && me.isTurn && !room.pending;
+  const canPlay = room.status === "playing" && me.isTurn && !room.pending && !busy;
+  const meIndex = room.players.findIndex((player) => player.id === room.viewerId);
+  const leftNeighbor = room.players[(meIndex + 1) % room.players.length];
+  const rightNeighbor = room.players[(meIndex - 1 + room.players.length) % room.players.length];
+  const next = room.players.find((player) => player.id === room.nextPlayerId);
   const [seconds, setSeconds] = useState<number | null>(null);
   useEffect(() => {
     if (!room.turnEndsAt) { setSeconds(null); return; }
@@ -281,18 +314,24 @@ function Game({ room, invoke, selectedCard, setSelectedCard, busy }: {
   return (
     <section className="game-layout">
       <div className="turn-banner">
-        <div><span>TURN {room.turnNumber}</span><strong>{room.status === "finished" ? "ゲーム終了" : me.isTurn ? "あなたの番です" : `${current?.name ?? ""}さんの番`}</strong></div>
-        {seconds !== null && <div className={`timer ${seconds <= 10 ? "timer-danger" : ""}`}>{seconds}</div>}
+        <div><span>TURN {room.turnNumber} ・ 席順どおり</span><strong>{room.status === "finished" ? "ゲーム終了" : me.isTurn ? "あなたの番です" : `${withSan(current?.name ?? "")}の番`}</strong><small>{next ? `次は ${withSan(next.name)}` : ""}</small></div>
+        <div className="turn-tools">{seconds !== null && <div className={`timer ${seconds <= 10 ? "timer-danger" : ""}`}>{seconds}</div>}<button onClick={onHowTo}>遊び方</button></div>
       </div>
       <div className="player-strip" aria-label="プレイヤー一覧">
-        {room.players.map((player) => (
-          <div className={`player-chip ${player.isTurn ? "active" : ""}`} key={player.id}>
+        {room.players.map((player, index) => (<div className="order-item" key={player.id}>
+          <div className={`player-chip ${player.isTurn ? "active" : ""} ${player.id === room.nextPlayerId ? "next" : ""}`}>
+            <b className="seat-number">{player.seat}</b>
             <Avatar character={player.character} small />
-            <div><strong>{player.name}{player.id === room.viewerId ? "（あなた）" : ""}</strong><span>手札 {player.handCount}枚 {player.protected ? "・守られ中" : ""}</span></div>
+            <div><strong>{player.name}{player.id === room.viewerId ? "（あなた）" : ""}</strong><span>手札 {player.handCount}枚 {player.protected ? "・🛡 守られ中" : ""}</span></div>
+            {player.isTurn ? <em className="turn-label">現在</em> : player.id === room.nextPlayerId ? <em className="next-label">次</em> : null}
             {!player.connected && <i>OFF</i>}
           </div>
-        ))}
+          {index < room.players.length - 1 && <span className="order-arrow" aria-hidden="true">→</span>}
+        </div>))}
+        <span className="order-loop" aria-label={`席${room.players.length}から席1へ戻る`}>↻ 席1</span>
       </div>
+      <p className="order-hint">← 横にスワイプして全員の席順を確認 →</p>
+      <div className="neighbor-guide page-width"><span>右どなり <strong>{rightNeighbor?.name}</strong></span><b>あなた（席{me.seat}）</b><span>カード移動先・左どなり <strong>{leftNeighbor?.name}</strong> →</span></div>
       <div className="table-area page-width">
         <section className="played-card panel">
           <span className="panel-label">直前のカード</span>
@@ -322,15 +361,28 @@ function Game({ room, invoke, selectedCard, setSelectedCard, busy }: {
 function PendingAction({ room, invoke, busy }: { room: RoomView; invoke: <T>(event: string, payload?: unknown) => Promise<T | undefined>; busy: boolean }) {
   const pending = room.pending!;
   const actionable = pending.kind !== "waiting";
+  const cancel = pending.cancellable ? () => invoke("cancelAction", { pendingId: pending.id }) : undefined;
+  const cardName = pending.card ? CARD_DEFINITIONS[pending.card].name : "カードの効果";
+  const [remaining, setRemaining] = useState(() => pending.expiresAt ? Math.max(0, Math.ceil((pending.expiresAt - Date.now()) / 1000)) : null);
+  useEffect(() => {
+    if (!pending.expiresAt) return;
+    const tick = () => setRemaining(Math.max(0, Math.ceil((pending.expiresAt! - Date.now()) / 1000)));
+    tick();
+    const timer = window.setInterval(tick, 250);
+    return () => window.clearInterval(timer);
+  }, [pending.expiresAt]);
   return (
-    <Modal title={actionable ? "カードの効果" : "しばらくお待ちください"} lock>
+    <Modal title={actionable ? `${cardName}｜選択` : `${cardName}｜待機中`} lock={!pending.cancellable} onClose={cancel}>
       <div className="pending-action">
+        {pending.card && <div className="pending-card-summary"><span className={`category-badge category-${CARD_DEFINITIONS[pending.card].category}`}>{CARD_CATEGORY_LABELS[CARD_DEFINITIONS[pending.card].category]}</span><strong>{CARD_DEFINITIONS[pending.card].shortDescription}</strong></div>}
         <p>{pending.prompt}</p>
+        {remaining !== null && <small className="pending-time">あと{remaining}秒 {pending.cancellable ? "・期限で自動キャンセル" : "・未選択は自動で決定"}</small>}
         {pending.totalCount !== undefined && <div className="progress"><span style={{ width: `${((pending.selectedCount ?? 0) / pending.totalCount) * 100}%` }} /></div>}
         {actionable && <div className="option-grid">{pending.options.map((option) => {
           const type = option.meta as CardType | undefined;
           return <button key={option.id} disabled={busy} onClick={() => invoke("submitAction", { pendingId: pending.id, optionId: option.id })}>{type && <span className="option-card-dot" style={{ background: CARD_DEFINITIONS[type].accent }} />}{option.label}</button>;
         })}</div>}
+        {pending.cancellable && <Button variant="ghost" disabled={busy} onClick={cancel}>戻る（カードは使いません）</Button>}
         {!actionable && <div className="waiting-dots"><i /><i /><i /></div>}
       </div>
     </Modal>
@@ -345,8 +397,8 @@ function ResultModal({ room, invoke, busy }: { room: RoomView; invoke: <T>(event
       <div className="result-content">
         <span className="result-mark">!</span>
         <p>{result.reason === "deduced" ? "ひみつを見ぬいた！" : "ひみつを守りきった！"}</p>
-        <h2>{result.winnerName}さんの勝ち</h2>
-        <dl><div><dt>最後のひみつ</dt><dd>{result.secretHolderName}さん</dd></div><div><dt>ゲーム時間</dt><dd>{formatDuration(result.durationSeconds)}</dd></div></dl>
+        <h2>{withSan(result.winnerName)}の勝ち</h2>
+        <dl><div><dt>最後のひみつ</dt><dd>{withSan(result.secretHolderName)}</dd></div><div><dt>ゲーム時間</dt><dd>{formatDuration(result.durationSeconds)}</dd></div></dl>
         {isHost ? <div className="result-actions"><Button disabled={busy} onClick={() => invoke("rematch")}>同じメンバーでもう一度</Button><Button variant="secondary" disabled={busy} onClick={() => invoke("returnToLobby")}>ロビーへ戻る</Button></div> : <p className="muted">ホストが次のゲームを選びます</p>}
         <Button variant="ghost" onClick={() => window.location.assign("/")}>トップへ戻る</Button>
       </div>
@@ -355,21 +407,36 @@ function ResultModal({ room, invoke, busy }: { room: RoomView; invoke: <T>(event
 }
 
 function PrivateNotice({ notice, onClose }: { notice: Notice; onClose: () => void }) {
-  return <Modal title="あなただけの情報" onClose={onClose}><div className="private-notice"><p>{notice.title}</p><div className="notice-cards">{notice.cards.map((type, index) => <MiniCard key={`${type}-${index}`} type={type} />)}</div><Button onClick={onClose}>確認しました</Button></div></Modal>;
+  return <Modal title="あなただけの情報" onClose={onClose}><div className="private-notice"><p>{notice.title}</p>{notice.message && <span>{notice.message}</span>}<div className="notice-cards">{notice.cards.map((type, index) => <MiniCard key={`${type}-${index}`} type={type} />)}</div><Button onClick={onClose}>確認しました</Button></div></Modal>;
 }
 
 function CardDetail({ card, canUse, busy, onClose, onUse }: { card: CardView; canUse: boolean; busy: boolean; onClose: () => void; onUse: () => void }) {
   const definition = CARD_DEFINITIONS[card.type];
-  return <Modal title={definition.name} onClose={onClose}><div className="card-detail"><Art type={card.type} /><p>{definition.description}</p><span className="character-credit">出演：{CHARACTER_NAMES[definition.character]}</span><Button disabled={!canUse || busy} onClick={onUse}>{card.type === "secret" ? "このカードは使えません" : canUse ? "このカードを使う" : "自分の番を待ってください"}</Button></div></Modal>;
+  return <Modal title={definition.name} onClose={onClose}><div className="card-detail"><Art type={card.type} /><span className={`category-badge category-${definition.category}`}>{CARD_CATEGORY_LABELS[definition.category]}</span><p>{definition.description}</p><span className="character-credit">出演：{CHARACTER_NAMES[definition.character]}</span><Button disabled={!canUse || busy} onClick={onUse}>{card.type === "secret" ? "このカードは使えません" : canUse ? "このカードを使う" : "自分の番を待ってください"}</Button></div></Modal>;
 }
 
 function HowToModal({ onClose }: { onClose: () => void }) {
-  return <Modal title="遊び方" onClose={onClose}><div className="howto"><div className="rule-lead"><span>?</span><p>たった1枚の「ひみつ」が、交換カードでみんなの手をめぐります。</p></div><ol><li><strong>カードを使う</strong><span>のぞく・交換する・候補を絞る。自分の番に1枚使います。</span></li><li><strong>いまの持ち主を考える</strong><span>見た情報と公開ログを頼りに、ひみつの行方を追います。</span></li><li><strong>「みぬく」で勝負</strong><span>当てれば推理側の勝ち。全員がカードを使い切れば、最後の持ち主が勝ち。</span></li></ol><p className="muted">3〜8人用・アカウント不要。手札の内容は持ち主にしか送られません。</p></div></Modal>;
+  const [category, setCategory] = useState<CardCategory | "all">("all");
+  const [detail, setDetail] = useState<CardType | null>(null);
+  const categories = Object.keys(CARD_CATEGORY_LABELS) as CardCategory[];
+  const cards = CARD_TYPES.filter((type) => category === "all" || CARD_DEFINITIONS[type].category === category);
+  return <Modal title="遊び方・カード一覧" onClose={onClose}><div className="howto">
+    <div className="rule-lead"><span>?</span><p>たった1枚の「ひみつ」が、交換カードでみんなの手をめぐります。</p></div>
+    <section><h3>勝ち方</h3><ol><li><strong>自分の番にカードを1枚使う</strong><span>情報を集め、交換で現在地を揺らします。</span></li><li><strong>「みぬく」で持ち主を指名</strong><span>当てれば指名した人の勝ちです。</span></li><li><strong>最後まで逃げ切る</strong><span>使えるカードがなくなれば、最後の持ち主が勝ちです。</span></li></ol></section>
+    <section><h3>席順と左どなり</h3><div className="howto-order"><b>席1</b><span>→</span><b>席2</b><span>→</span><b>席3</b><span>→</span><b>席1</b></div><p className="muted">ターンも「ぐるっと回す」の移動も、席番号が増える向きです。自分の次の席が左どなり、前の席が右どなりです。</p></section>
+    <section><h3>全11種類のカード</h3><div className="category-filter"><button className={category === "all" ? "active" : ""} onClick={() => setCategory("all")}>すべて</button>{categories.map((item) => <button key={item} className={category === item ? "active" : ""} onClick={() => setCategory(item)}>{CARD_CATEGORY_LABELS[item]}</button>)}</div><div className="card-catalog">{cards.map((type) => { const def = CARD_DEFINITIONS[type]; return <button key={type} onClick={() => setDetail(detail === type ? null : type)}><Art type={type} /><div><span className={`category-badge category-${def.category}`}>{CARD_CATEGORY_LABELS[def.category]}</span><strong>{def.name}</strong><small>{def.shortDescription}</small></div>{detail === type && <p>{def.description}</p>}</button>; })}</div></section>
+    <p className="muted">カードの効果が確定する前の対象選択は「戻る」で取り消せます。手札の内容や非公開の対象者は、関係する本人にだけ通知されます。</p>
+  </div></Modal>;
 }
 
 function GameCard({ card, disabled, onClick }: { card: CardView; disabled: boolean; onClick: () => void }) {
   const definition = CARD_DEFINITIONS[card.type];
-  return <button className={`game-card ${disabled ? "disabled" : ""}`} onClick={onClick} style={{ "--card-accent": definition.accent } as CSSProperties}><Art type={card.type} /><span className="game-card-name">{definition.name}</span><span className="game-card-hint">タップして確認</span></button>;
+  return <button className={`game-card ${disabled ? "disabled" : ""}`} onClick={onClick} style={{ "--card-accent": definition.accent } as CSSProperties}><Art type={card.type} /><span className={`category-badge category-${definition.category}`}>{CARD_CATEGORY_LABELS[definition.category]}</span><span className="game-card-name">{definition.name}</span><span className="game-card-hint">{definition.shortDescription}</span></button>;
+}
+
+function CardCutIn({ effect, fast }: { effect: CardEffectEvent; fast: boolean }) {
+  const definition = CARD_DEFINITIONS[effect.card];
+  return <div className={`card-cut-in category-${definition.category} ${fast ? "fast" : ""}`} role="status" aria-live="assertive"><div className="cut-in-speed" /><div className="cut-in-card"><Art type={effect.card} /><div><span>{withSan(effect.actorName)}が使用</span><strong>{definition.name}</strong><p>{definition.cutInText}</p>{effect.targetPublic && effect.targetName && <small>対象：{withSan(effect.targetName)}</small>}</div></div></div>;
 }
 
 function MiniCard({ type }: { type: CardType }) {
@@ -395,7 +462,14 @@ function Button({ children, variant = "primary", ...props }: React.ButtonHTMLAtt
 }
 
 function Modal({ title, children, onClose, lock = false }: { title: string; children: ReactNode; onClose?: () => void; lock?: boolean }) {
-  return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={title} onMouseDown={(event) => { if (!lock && event.target === event.currentTarget) onClose?.(); }}><div className="modal"><div className="modal-header"><h2>{title}</h2>{!lock && <button onClick={onClose} aria-label="閉じる">×</button>}</div>{children}</div></div>;
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    dialogRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape" && !lock) onClose?.(); };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [lock, onClose]);
+  return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={title} onMouseDown={(event) => { if (!lock && event.target === event.currentTarget) onClose?.(); }}><div className="modal" ref={dialogRef} tabIndex={-1}><div className="modal-header"><h2>{title}</h2>{!lock && <button onClick={onClose} aria-label="閉じる">×</button>}</div>{children}</div></div>;
 }
 
 function formatDuration(seconds: number) { return `${Math.floor(seconds / 60)}分${seconds % 60}秒`; }

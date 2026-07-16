@@ -1,12 +1,15 @@
 import express from "express";
 import { createServer } from "node:http";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { Server, type Socket } from "socket.io";
 import { z } from "zod";
 import type { Ack, GameSettings } from "../../shared/types.js";
 import {
   addPlayer,
+  cancelAction,
   createRoom,
+  expirePending,
   kickPlayer,
   playCard,
   returnToLobby,
@@ -54,6 +57,7 @@ app.use((request, response, next) => {
 io.on("connection", (socket) => {
   socket.on("createRoom", (input, ack: (result: Ack<{ code: string; playerId: string; token: string }>) => void) => {
     safeAck(ack, () => {
+      ensureSocketFree(socket);
       const { name } = createSchema.parse(input);
       const code = generateRoomCode();
       const room = createRoom(code, name, socket.id);
@@ -68,6 +72,7 @@ io.on("connection", (socket) => {
 
   socket.on("joinRoom", (input, ack: (result: Ack<{ code: string; playerId: string; token: string }>) => void) => {
     safeAck(ack, () => {
+      ensureSocketFree(socket);
       const { code, name } = joinSchema.parse(input);
       const room = requireRoom(code);
       const player = addPlayer(room, name, socket.id);
@@ -84,12 +89,19 @@ io.on("connection", (socket) => {
       const room = requireRoom(code);
       const player = room.players.find((candidate) => candidate.token === token);
       if (!player) throw new Error("再接続情報が見つかりません。名前を入力して参加してください");
+      const existingCode = socket.data.roomCode as string | undefined;
+      const existingPlayerId = socket.data.playerId as string | undefined;
+      if (existingCode || existingPlayerId) {
+        if (existingCode !== code || existingPlayerId !== player.id) throw new Error("すでに別の部屋へ参加しています");
+        if (player.socketId && player.socketId !== socket.id) throw new Error("この席は新しい接続で再開されています");
+      }
       if (player.socketId && player.socketId !== socket.id) io.sockets.sockets.get(player.socketId)?.disconnect(true);
       player.socketId = socket.id;
       player.connected = true;
       socket.data.roomCode = code;
       socket.data.playerId = player.id;
       publish(room);
+      for (const notice of player.pendingNotices) socket.emit("privateNotice", notice);
       return { code, playerId: player.id, token: player.token };
     });
   });
@@ -139,6 +151,24 @@ io.on("connection", (socket) => {
       const optionId = z.string().min(1).parse(input?.optionId);
       const outcome = submitAction(room, socket.data.playerId, pendingId, optionId);
       publish(room, outcome);
+    });
+  });
+
+  socket.on("cancelAction", (input, ack: (result: Ack) => void) => {
+    safeAck(ack, () => {
+      const room = roomForSocket(socket);
+      const pendingId = idSchema.parse(input?.pendingId);
+      cancelAction(room, socket.data.playerId, pendingId);
+      publish(room);
+    });
+  });
+
+  socket.on("ackNotice", (input, ack: (result: Ack) => void) => {
+    safeAck(ack, () => {
+      const room = roomForSocket(socket);
+      const noticeId = idSchema.parse(input?.noticeId);
+      const player = room.players.find((candidate) => candidate.id === socket.data.playerId)!;
+      player.pendingNotices = player.pendingNotices.filter((notice) => notice.id !== noticeId);
     });
   });
 
@@ -198,7 +228,8 @@ io.on("connection", (socket) => {
   });
 });
 
-function safeAck<T>(ack: (result: Ack<T>) => void, operation: () => T | void): void {
+function safeAck<T>(ack: ((result: Ack<T>) => void) | undefined, operation: () => T | void): void {
+  if (typeof ack !== "function") return;
   try {
     const data = operation();
     ack(data === undefined ? { ok: true } : { ok: true, data: data as T });
@@ -208,29 +239,55 @@ function safeAck<T>(ack: (result: Ack<T>) => void, operation: () => T | void): v
   }
 }
 
+function ensureSocketFree(socket: Socket): void {
+  if (socket.data.roomCode || socket.data.playerId) throw new Error("すでに部屋へ参加しています");
+}
+
 function publish(room: RoomInternal, outcome?: ActionOutcome): void {
   const oldTimer = roomTimers.get(room.code);
   if (oldTimer) clearTimeout(oldTimer);
   roomTimers.delete(room.code);
 
   if (outcome) {
+    for (const effect of outcome.effects) {
+      for (const player of room.players) {
+        if (player.connected && player.socketId) io.to(player.socketId).emit("cardEffect", effect);
+      }
+    }
     for (const notice of outcome.notices) {
       const player = room.players.find((candidate) => candidate.id === notice.playerId);
-      if (player?.socketId) io.to(player.socketId).emit("privateNotice", notice);
+      if (!player) continue;
+      const queued = { ...notice, id: randomUUID() };
+      player.pendingNotices.push(queued);
+      if (player.pendingNotices.length > 20) player.pendingNotices.shift();
+      if (player.socketId) io.to(player.socketId).emit("privateNotice", queued);
     }
   }
 
-  if (room.status === "playing" && !room.pending) {
+  if (room.status === "playing" && room.pending) {
+    room.turnEndsAt = null;
+    const delay = Math.max(0, room.pending.expiresAt - Date.now());
+    const timer = setTimeout(() => {
+      const latest = rooms.get(room.code);
+      if (!latest?.pending || latest.pending.id !== room.pending?.id) return;
+      const outcome = expirePending(latest);
+      publish(latest, outcome);
+    }, delay);
+    timer.unref();
+    roomTimers.set(room.code, timer);
+  } else if (room.status === "playing") {
     const current = room.players[room.turnIndex];
     const seconds = room.settings.turnSeconds || (current.connected ? 0 : 90);
-    room.turnEndsAt = seconds ? Date.now() + seconds * 1000 : null;
+    if (!seconds) room.turnEndsAt = null;
+    else if (!room.turnEndsAt) room.turnEndsAt = Date.now() + seconds * 1000;
     if (seconds) {
+      const delay = Math.max(0, room.turnEndsAt! - Date.now());
       const timer = setTimeout(() => {
         const latest = rooms.get(room.code);
         if (!latest || latest.status !== "playing" || latest.pending) return;
         timeoutTurn(latest);
         publish(latest);
-      }, seconds * 1000);
+      }, delay);
       timer.unref();
       roomTimers.set(room.code, timer);
     }
@@ -263,7 +320,8 @@ function roomForSocket(socket: Socket): RoomInternal {
   const playerId = socket.data.playerId as string | undefined;
   if (!code || !playerId) throw new Error("部屋へ入り直してください");
   const room = requireRoom(code);
-  if (!room.players.some((player) => player.id === playerId)) throw new Error("プレイヤー情報が見つかりません");
+  const player = room.players.find((candidate) => candidate.id === playerId);
+  if (!player || player.socketId !== socket.id) throw new Error("プレイヤー情報が見つかりません。再接続してください");
   return room;
 }
 
