@@ -228,28 +228,28 @@ function EntryScreen({ mode, setMode, onEnter, busy, error, onHowTo }: {
   return (
     <section className="entry-layout">
       <div className="hero-copy">
-        <span className="eyebrow">3〜8人のオンライン推理ゲーム</span>
-        <h1>そのひみつ、<br /><em>いま誰の手に？</em></h1>
-        <p>カードを見て、交換して、惑わせて。めぐり続ける「ひみつ」の現在地を見ぬこう。</p>
-        <div className="hero-facts"><span>会員登録なし</span><span>スマホ対応</span><span>1ゲーム約10分</span></div>
+        <span className="eyebrow">小さな事件から始まる、オンライン推理カードゲーム</span>
+        <h1>ひみつは、<br /><em>手から手へ。</em></h1>
+        <p>ちらりとのぞいて、こっそり交換。うわさとおとりをかいくぐり、たった1枚の「ひみつ」を追いかけよう。持ち主をみぬくのは、だれ？</p>
+        <div className="hero-facts"><span>3〜8人で遊べる</span><span>登録なしですぐ参加</span><span>1ゲーム約10分</span></div>
       </div>
       <div className="hero-stage">
         <img className="hero-key-visual" src="/assets/pages/top/hero.png?v=visual3" alt="5人のキャラクターがひみつカードをめぐらせている様子" />
         <div className="entry-card">
           {mode === "home" ? (
             <>
-              <Button onClick={() => setMode("create")}>部屋を作る</Button>
-              <Button variant="secondary" onClick={() => setMode("join")}>部屋に参加</Button>
-              <Button variant="ghost" onClick={onHowTo}>遊び方を見る</Button>
+              <Button onClick={() => setMode("create")}>部屋を作ってはじめる</Button>
+              <Button variant="secondary" onClick={() => setMode("join")}>ルームコードで参加</Button>
+              <Button variant="ghost" onClick={onHowTo}>遊び方とカードを見る</Button>
             </>
           ) : (
             <form onSubmit={submit}>
               <button className="back-link" type="button" onClick={() => setMode("home")}>← 戻る</button>
-              <h2>{mode === "create" ? "新しい部屋" : "部屋に参加"}</h2>
+              <h2>{mode === "create" ? "新しい部屋を作る" : "ひみつの部屋に参加"}</h2>
               {mode === "join" && <Field label="6桁のルームコード" value={code} onChange={(value) => setCode(value.replace(/[^a-z0-9]/gi, "").slice(0, 6).toUpperCase())} placeholder="ABC123" autoFocus={!code} />}
               <Field label="プレイヤー名" value={name} onChange={setName} placeholder="おなまえ" autoFocus={Boolean(code) || mode === "create"} maxLength={16} />
               {error && <p className="form-error" role="alert">{error}</p>}
-              <Button type="submit" disabled={busy || !name.trim() || (mode === "join" && code.length !== 6)}>{busy ? "接続中…" : mode === "create" ? "部屋を作成" : "参加する"}</Button>
+              <Button type="submit" disabled={busy || !name.trim() || (mode === "join" && code.length !== 6)}>{busy ? "接続中…" : mode === "create" ? "この部屋を作る" : "この部屋に参加"}</Button>
             </form>
           )}
         </div>
