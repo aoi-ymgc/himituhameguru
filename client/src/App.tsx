@@ -86,11 +86,13 @@ export default function App() {
       setError(message);
       window.history.replaceState({}, "", "/");
     };
+    const onDisconnect = () => setBusy(false);
     socket.on("connect", reconnect);
     socket.on("roomState", onState);
     socket.on("privateNotice", onNotice);
     socket.on("cardEffect", onEffect);
     socket.on("kicked", onKicked);
+    socket.on("disconnect", onDisconnect);
     if (socket.connected) reconnect();
     return () => {
       socket.off("connect", reconnect);
@@ -98,6 +100,7 @@ export default function App() {
       socket.off("privateNotice", onNotice);
       socket.off("cardEffect", onEffect);
       socket.off("kicked", onKicked);
+      socket.off("disconnect", onDisconnect);
     };
   }, [soundOn]);
 
@@ -106,11 +109,15 @@ export default function App() {
     const next = effectQueue[0];
     setEffectQueue((queue) => queue.slice(1));
     setCutIn(next);
+  }, [cutIn, effectQueue]);
+
+  useEffect(() => {
+    if (!cutIn) return;
     signal(soundOn, "reveal");
     const duration = roomRef.current?.settings.animationSpeed === "fast" ? 850 : 1450;
     const timer = window.setTimeout(() => setCutIn(null), duration);
     return () => window.clearTimeout(timer);
-  }, [cutIn, effectQueue, soundOn]);
+  }, [cutIn, soundOn]);
 
   useEffect(() => {
     if (cutIn || privateNotice || noticeQueue.length === 0) return;
@@ -118,19 +125,29 @@ export default function App() {
     setNoticeQueue((queue) => queue.slice(1));
     setPrivateNotice(next);
     signal(soundOn, "reveal");
-    const timer = window.setTimeout(() => {
-      socket.emit("ackNotice", { noticeId: next.id }, () => undefined);
-      setPrivateNotice((current) => current === next ? null : current);
-    }, next.durationMs);
-    return () => window.clearTimeout(timer);
   }, [cutIn, privateNotice, noticeQueue, soundOn]);
+
+  useEffect(() => {
+    if (!privateNotice) return;
+    const notice = privateNotice;
+    const timer = window.setTimeout(() => {
+      socket.emit("ackNotice", { noticeId: notice.id }, () => undefined);
+      setPrivateNotice((current) => current === notice ? null : current);
+    }, notice.durationMs);
+    return () => window.clearTimeout(timer);
+  }, [privateNotice]);
 
   const invoke = <T,>(event: string, payload: unknown = {}): Promise<T | undefined> => {
     setBusy(true);
     setError("");
     return new Promise((resolve) => {
-      socket.emit(event, payload, (ack: Ack<T>) => {
+      socket.timeout(8_000).emit(event, payload, (timeoutError: Error | null, ack?: Ack<T>) => {
         setBusy(false);
+        if (timeoutError || !ack) {
+          setError("通信に時間がかかっています。接続を確認して、もう一度お試しください");
+          resolve(undefined);
+          return;
+        }
         if (!ack.ok) {
           setError(ack.error ?? "処理に失敗しました");
           resolve(undefined);
