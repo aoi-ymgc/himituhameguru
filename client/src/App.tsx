@@ -114,7 +114,7 @@ export default function App() {
   useEffect(() => {
     if (!cutIn) return;
     signal(soundOn, "reveal");
-    const duration = roomRef.current?.settings.animationSpeed === "fast" ? 850 : 1450;
+    const duration = roomRef.current?.settings.animationSpeed === "fast" ? 1100 : 1850;
     const timer = window.setTimeout(() => setCutIn(null), duration);
     return () => window.clearTimeout(timer);
   }, [cutIn, soundOn]);
@@ -352,8 +352,8 @@ function Game({ room, invoke, selectedCard, setSelectedCard, busy, onHowTo }: {
   const current = room.players.find((player) => player.isTurn);
   const canPlay = room.status === "playing" && me.isTurn && !room.pending && !busy;
   const meIndex = room.players.findIndex((player) => player.id === room.viewerId);
-  const leftNeighbor = room.players[(meIndex + 1) % room.players.length];
-  const rightNeighbor = room.players[(meIndex - 1 + room.players.length) % room.players.length];
+  const nextNeighbor = room.players[(meIndex + 1) % room.players.length];
+  const previousNeighbor = room.players[(meIndex - 1 + room.players.length) % room.players.length];
   const next = room.players.find((player) => player.id === room.nextPlayerId);
   const [seconds, setSeconds] = useState<number | null>(null);
   useEffect(() => {
@@ -386,7 +386,7 @@ function Game({ room, invoke, selectedCard, setSelectedCard, busy, onHowTo }: {
         <span className="order-loop" aria-label={`席${room.players.length}から席1へ戻る`}>↻ 席1</span>
       </div>
       <p className="order-hint">← 横にスワイプして全員の席順を確認 →</p>
-      <div className="neighbor-guide page-width"><span>右どなり <strong>{rightNeighbor?.name}</strong></span><b>あなた（席{me.seat}）</b><span>カード移動先・左どなり <strong>{leftNeighbor?.name}</strong> →</span></div>
+      <div className="neighbor-guide page-width"><span>前の順番 <strong>{previousNeighbor?.name}</strong></span><b>あなた（席{me.seat}）</b><span>カード移動先・右どなり <strong>{nextNeighbor?.name}</strong> →</span></div>
       <div className="table-area page-width">
         <section className="played-card panel">
           <span className="panel-label">直前のカード</span>
@@ -484,7 +484,7 @@ function HowToModal({ onClose }: { onClose: () => void }) {
   return <Modal title="遊び方・カード一覧" onClose={onClose}><div className="howto">
     <div className="rule-lead"><img src="/assets/pages/help/guide.png?v=visual3" alt="ひつじがカードのめぐり方を案内している様子" /><p>たった1枚の「ひみつ」が、交換カードでみんなの手をめぐります。</p></div>
     <section><h3>ゲームの流れと勝ち方</h3><ol><li><strong>「みつけた！」の人が事件を発表</strong><span>自由入力かランダムのお題を発表し、その人からゲームを始めます。</span></li><li><strong>自分の番にカードを1枚使う</strong><span>情報を集め、交換で現在地を揺らします。</span></li><li><strong>「みぬく」で持ち主を指名</strong><span>当たれば推理側、使い切れば最後の保持者となかまが共同勝利です。</span></li></ol></section>
-    <section><h3>席順と左どなり</h3><div className="howto-order"><b>席1</b><span>→</span><b>席2</b><span>→</span><b>席3</b><span>→</span><b>席1</b></div><p className="muted">ターンも「ぐるっと回す」の移動も、席番号が増える向きです。自分の次の席が左どなり、前の席が右どなりです。</p></section>
+    <section><h3>席順と右どなり</h3><div className="howto-order"><b>席1</b><span>→</span><b>席2</b><span>→</span><b>席3</b><span>→</span><b>席1</b></div><p className="muted">ターンも「ぐるっと回す」の移動も、画面上の矢印どおりです。自分から見て右にいる次の順番の人へ進みます。</p></section>
     <section><h3>全{CARD_TYPES.length}種類のカード</h3><div className="category-filter"><button className={category === "all" ? "active" : ""} onClick={() => setCategory("all")}>すべて</button>{categories.map((item) => <button key={item} className={category === item ? "active" : ""} onClick={() => setCategory(item)}>{CARD_CATEGORY_LABELS[item]}</button>)}</div><div className="card-catalog">{cards.map((type) => { const def = CARD_DEFINITIONS[type]; return <button key={type} onClick={() => setDetail(detail === type ? null : type)}><Art type={type} /><div><span className={`category-badge category-${def.category}`}>{CARD_CATEGORY_LABELS[def.category]}</span><strong>{def.name}</strong><small>{def.shortDescription}</small></div>{detail === type && <p>{def.description}</p>}</button>; })}</div></section>
     <p className="muted">カードの効果が成立しない場合だけ、確認後に効果なしで捨てて次へ進めます。「おとり」は手札にある間に自動発動し、自分の番では効果なしで捨てられます。対象選択は「戻る」で取り消せます。</p>
   </div></Modal>;
@@ -497,7 +497,8 @@ function GameCard({ card, disabled, onClick }: { card: CardView; disabled: boole
 
 function CardCutIn({ effect, fast }: { effect: CardEffectEvent; fast: boolean }) {
   const definition = CARD_DEFINITIONS[effect.card];
-  return <div className={`card-cut-in category-${definition.category} ${fast ? "fast" : ""}`} role="status" aria-live="assertive"><div className="cut-in-speed" /><div className="cut-in-card"><Art type={effect.card} /><div><span>{withSan(effect.actorName)}が使用</span><strong>{definition.name}</strong><p>{definition.cutInText}</p>{effect.targetPublic && effect.targetName && <small>対象：{withSan(effect.targetName)}</small>}</div></div></div>;
+  const failed = effect.outcome === "deduce-failed";
+  return <div className={`card-cut-in category-${definition.category} ${failed ? "result-failure" : ""} ${fast ? "fast" : ""}`} role="status" aria-live="assertive"><div className="cut-in-speed" /><div className="cut-in-card"><Art type={effect.card} /><div><span>{failed ? `${withSan(effect.actorName)}の推理結果` : `${withSan(effect.actorName)}が使用`}</span><strong>{failed ? "みぬけなかった！" : definition.name}</strong><p>{failed && effect.targetName ? `${withSan(effect.targetName)}は「ひみつ」を持っていません` : definition.cutInText}</p>{!failed && effect.targetPublic && effect.targetName && <small>対象：{withSan(effect.targetName)}</small>}</div></div></div>;
 }
 
 function MiniCard({ type }: { type: CardType }) {

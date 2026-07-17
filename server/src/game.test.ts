@@ -42,7 +42,7 @@ test("こっそり交換で『ひみつ』が別プレイヤーへ移動する",
   assert.equal(target.hand.some((item) => item.type === "secret"), true);
 });
 
-test("みぬく正解時に即終了し、外れた場合は続行する", () => {
+test("みぬく正解時に即終了し、外れた場合は失敗演出を出して続行する", () => {
   const correct = playingRoom();
   correct.players[0].hand = [card("deduce")];
   correct.players[1].hand = [card("secret"), card("peek")];
@@ -57,9 +57,10 @@ test("みぬく正解時に即終了し、外れた場合は続行する", () =>
   wrong.players[1].hand = [card("peek")];
   wrong.players[2].hand = [card("secret"), card("swap"), card("deduce")];
   playCard(wrong, wrong.players[0].id, wrong.players[0].hand[0].instanceId);
-  submitAction(wrong, wrong.players[0].id, wrong.pending!.id, wrong.players[1].id);
+  const wrongOutcome = submitAction(wrong, wrong.players[0].id, wrong.pending!.id, wrong.players[1].id);
   assert.equal(wrong.status, "playing");
   assert.equal(wrong.result, null);
+  assert.equal(wrongOutcome.effects.some((effect) => effect.outcome === "deduce-failed" && effect.targetId === wrong.players[1].id), true);
 });
 
 test("使えるカードが尽きると最後の『ひみつ』保持者が勝つ", () => {
@@ -120,7 +121,7 @@ test("おすそわけで双方が選んだカードを交換できる", () => {
   assert.equal(room.players[0].hand.some((item) => item.type === "peek"), true);
 });
 
-test("ぐるっと回すで全員の選択後に左どなりへ同時移動する", () => {
+test("ぐるっと回すで全員の選択後に右どなり（次の順番）へ同時移動する", () => {
   const room = playingRoom();
   room.players[0].hand = [card("rotate"), card("secret")];
   room.players[1].hand = [card("peek")];

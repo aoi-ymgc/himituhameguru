@@ -452,6 +452,7 @@ export function submitAction(room: RoomInternal, playerId: string, pendingId: st
         finishGame(room, "detective", "deduced", actor);
       } else {
         addLog(room, `予想ははずれ。${withSan(target.name)}は『ひみつ』を持っていませんでした`);
+        effects.push(effectEvent(actor, "deduce", target, "deduce-failed"));
         if (!hasDeduceCards(room)) {
           addLog(room, "『みぬく』をすべて使い切ったため、ひみつの持ち主が逃げ切りました");
           finishGame(room, "secret", "escaped");
@@ -530,7 +531,7 @@ export function submitAction(room: RoomInternal, playerId: string, pendingId: st
       const actorId = pending.actorId;
       resolveRotate(room);
       room.pending = null;
-      addLog(room, "全員のカードが左どなりへ回りました");
+      addLog(room, "全員のカードが右どなり（次の順番の人）へ回りました");
       turnAdvanced = finishAction(room, actorId, false);
     }
   }
@@ -714,7 +715,7 @@ function pendingView(room: RoomInternal, viewerId: string): PendingView | null {
   }
   const selectedCount = Object.values(pending.selections).filter((value) => value !== undefined).length;
   if (pending.selections[viewerId] === undefined) {
-    return { ...cardSelectionView(room, pending.id, viewerId, "左どなりへ渡すカードを選んでください"), kind: "rotate", selectedCount, totalCount: room.players.length, card: "rotate", expiresAt: pending.expiresAt };
+    return { ...cardSelectionView(room, pending.id, viewerId, "右どなり（次の順番の人）へ渡すカードを選んでください"), kind: "rotate", selectedCount, totalCount: room.players.length, card: "rotate", expiresAt: pending.expiresAt };
   }
   return { id: pending.id, kind: "waiting", prompt: "ほかのプレイヤーの選択を待っています…", options: [], selectedCount, totalCount: room.players.length, card: "rotate", expiresAt: pending.expiresAt };
 }
@@ -754,7 +755,7 @@ function recallableRecords(room: RoomInternal, playerId: string): DiscardRecord[
   return room.discardRecords.filter((record) => record.playerId === playerId && record.reason === "played" && allowed.has(record.card.type));
 }
 
-function effectEvent(actor: PlayerInternal, card: CardType, target?: PlayerInternal): CardEffectEvent {
+function effectEvent(actor: PlayerInternal, card: CardType, target?: PlayerInternal, outcome?: CardEffectEvent["outcome"]): CardEffectEvent {
   return {
     id: randomUUID(),
     actorId: actor.id,
@@ -763,6 +764,7 @@ function effectEvent(actor: PlayerInternal, card: CardType, target?: PlayerInter
     targetId: target?.id,
     targetName: target?.name,
     targetPublic: Boolean(target),
+    outcome,
   };
 }
 

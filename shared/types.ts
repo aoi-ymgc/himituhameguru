@@ -62,6 +62,7 @@ export interface CardEffectEvent {
   targetId?: string;
   targetName?: string;
   targetPublic: boolean;
+  outcome?: "deduce-failed";
 }
 
 export interface GameResult {
