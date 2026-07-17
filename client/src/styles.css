@@ -233,13 +233,84 @@ main { min-height: calc(100vh - 64px); }
 .card-catalog > button { display: grid; grid-template-columns: 70px 1fr; gap: 10px; align-items: center; border: 1px solid var(--color-border); border-radius: 14px; background: white; padding: 6px; text-align: left; cursor: pointer; }
 .card-catalog .art-window { height: 74px; }.card-catalog > button > div { display: grid; gap: 3px; }.card-catalog strong { font-size: 14px; }.card-catalog small { color: var(--color-muted); font-size: 10px; font-weight: 700; }.card-catalog p { grid-column: 1 / -1; margin: 2px 7px 8px; font-size: 11px; font-weight: 700; line-height: 1.7; }
 
-.card-cut-in { position: fixed; inset: 0; z-index: 130; display: grid; place-items: center; overflow: hidden; background: color-mix(in srgb, var(--category-color) 87%, #102e29); pointer-events: all; animation: cut-bg 1.85s both; }
-.card-cut-in.fast { animation-duration: 1.1s; }.card-cut-in.result-failure { background: #672f3c; }.card-cut-in.result-failure .cut-in-card .art-window { filter: grayscale(.25); }.cut-in-speed { display: none; }
-.cut-in-card { position: relative; width: min(720px, calc(100% - 36px)); display: grid; grid-template-columns: minmax(125px, 240px) 1fr; gap: clamp(18px, 5vw, 48px); align-items: center; color: white; animation: cut-enter .32s cubic-bezier(.2,.9,.2,1) both; }
-.cut-in-card .art-window { height: min(42vw, 280px); border: 4px solid white; border-radius: 25px; box-shadow: 12px 12px 0 rgba(0,0,0,.22); transform: rotate(-4deg); }.cut-in-card > div:last-child { display: grid; gap: 7px; text-shadow: 0 3px 0 rgba(0,0,0,.22); }.cut-in-card span { font-size: 12px; font-weight: 900; letter-spacing: .1em; }.cut-in-card strong { font-size: clamp(34px, 9vw, 68px); line-height: 1; }.cut-in-card p { margin: 0; font-size: clamp(15px, 4vw, 24px); font-weight: 900; }.cut-in-card small { font-weight: 900; }
-@keyframes cut-enter { from { opacity: 0; transform: translateX(18%) scale(.9); } to { opacity: 1; transform: none; } }
-@keyframes cut-bg { 0% { opacity: 0; } 12%, 78% { opacity: 1; } 100% { opacity: 0; } }
-@keyframes speed-lines { to { transform: translateX(-30px) skewX(-10deg); } }
+.card-cut-in { --fx-loop: 1.25s; --fx-enter: .48s; --fx-speed: .82s; position: fixed; isolation: isolate; inset: 0; z-index: 130; display: grid; place-items: center; overflow: hidden; background: radial-gradient(circle at 24% 45%, color-mix(in srgb, var(--effect-accent) 70%, white) 0 8%, transparent 38%), linear-gradient(125deg, color-mix(in srgb, var(--category-color) 82%, #102e29), color-mix(in srgb, var(--category-color) 58%, #071c19)); pointer-events: all; animation: cut-bg 1.85s both; }
+.card-cut-in::before { content: ""; position: absolute; z-index: -2; inset: -45%; background: repeating-conic-gradient(from 15deg, rgba(255,255,255,.15) 0 5deg, transparent 5deg 14deg); animation: cut-rays var(--fx-loop) linear infinite; }
+.card-cut-in::after { content: ""; position: absolute; z-index: 4; top: -30%; bottom: -30%; left: -32%; width: 20%; background: linear-gradient(90deg, transparent, rgba(255,255,255,.38), transparent); filter: blur(8px); transform: skewX(-18deg); animation: cut-sweep var(--fx-loop) cubic-bezier(.2,.75,.2,1) both; pointer-events: none; }
+.card-cut-in.fast { --fx-loop: .72s; --fx-enter: .28s; --fx-speed: .48s; animation-duration: 1.1s; }
+.card-cut-in.result-failure { --effect-accent: #f1a0a9; background: radial-gradient(circle, #8e4552, #351820 72%); }
+.card-cut-in.result-failure::before { background: repeating-linear-gradient(135deg, rgba(255,255,255,.1) 0 3px, transparent 3px 18px); }
+.card-cut-in.result-failure .cut-in-card .art-window { filter: grayscale(.35); animation-name: fx-fail; }
+.cut-in-speed { position: absolute; z-index: -1; inset: 0; opacity: .46; background: repeating-linear-gradient(112deg, transparent 0 24px, rgba(255,255,255,.16) 25px 27px, transparent 28px 50px); animation: speed-lines var(--fx-speed) linear infinite; }
+.cut-in-emblem { position: absolute; z-index: -1; right: max(-2vw, -20px); top: 50%; color: rgba(255,255,255,.13); font: 900 clamp(180px, 38vw, 520px)/.75 Georgia, serif; letter-spacing: -.12em; transform: translateY(-48%) rotate(-8deg); text-shadow: 0 0 45px color-mix(in srgb, var(--effect-accent) 70%, transparent); animation: emblem-pop var(--fx-loop) cubic-bezier(.2,.9,.15,1) both; }
+.cut-in-particles { position: absolute; z-index: 1; inset: 0; pointer-events: none; }
+.cut-in-particles i { position: absolute; width: clamp(8px, 1.2vw, 16px); aspect-ratio: 1; border: 2px solid rgba(255,255,255,.78); background: color-mix(in srgb, var(--effect-accent) 55%, white); box-shadow: 0 0 16px color-mix(in srgb, var(--effect-accent) 70%, white); transform: rotate(45deg); animation: particle-rise var(--fx-loop) ease-out both; }
+.cut-in-particles i:nth-child(1) { left: 7%; top: 74%; animation-delay: .02s; }.cut-in-particles i:nth-child(2) { left: 16%; top: 19%; animation-delay: .18s; }.cut-in-particles i:nth-child(3) { left: 31%; top: 84%; animation-delay: .28s; }.cut-in-particles i:nth-child(4) { left: 46%; top: 10%; animation-delay: .1s; }.cut-in-particles i:nth-child(5) { left: 61%; top: 77%; animation-delay: .32s; }.cut-in-particles i:nth-child(6) { left: 73%; top: 21%; animation-delay: .22s; }.cut-in-particles i:nth-child(7) { left: 88%; top: 68%; animation-delay: .12s; }.cut-in-particles i:nth-child(8) { left: 94%; top: 31%; animation-delay: .38s; }
+.cut-in-card { position: relative; z-index: 3; width: min(760px, calc(100% - 36px)); display: grid; grid-template-columns: minmax(125px, 250px) 1fr; gap: clamp(18px, 5vw, 48px); align-items: center; color: white; animation: cut-enter var(--fx-enter) cubic-bezier(.16,1,.3,1) both; }
+.cut-in-card .art-window { height: min(42vw, 290px); border: 5px solid white; border-radius: 25px; box-shadow: 13px 13px 0 rgba(0,0,0,.22), 0 0 0 6px color-mix(in srgb, var(--effect-accent) 55%, transparent); transform: rotate(-4deg); animation: fx-bounce var(--fx-loop) cubic-bezier(.2,.9,.2,1) both; }.cut-in-card > div:last-child { display: grid; gap: 7px; text-shadow: 0 3px 0 rgba(0,0,0,.22); }.cut-in-card span { font-size: 12px; font-weight: 900; letter-spacing: .1em; }.cut-in-card strong { font-size: clamp(34px, 9vw, 68px); line-height: 1; text-wrap: balance; }.cut-in-card p { margin: 0; font-size: clamp(15px, 4vw, 24px); font-weight: 900; text-wrap: balance; }.cut-in-card small { font-weight: 900; }
+
+/* カードごとの演出 */
+.effect-secret .cut-in-speed, .effect-ally .cut-in-speed { background: radial-gradient(circle at center, transparent 0 18%, rgba(255,255,255,.12) 19% 20%, transparent 21% 33%, rgba(255,255,255,.08) 34% 35%, transparent 36%); animation: fx-pulse var(--fx-loop) ease-out both; }
+.effect-deduce::before { inset: -20%; background: repeating-conic-gradient(from 0deg, rgba(255,255,255,.24) 0 2deg, transparent 2deg 22deg); }
+.effect-deduce .cut-in-speed { inset: 50% auto auto 22%; width: min(58vw, 520px); aspect-ratio: 1; border: 3px solid rgba(255,255,255,.5); border-radius: 50%; background: radial-gradient(circle, transparent 0 9%, rgba(255,255,255,.85) 10% 11%, transparent 12% 27%, rgba(255,255,255,.38) 28% 29%, transparent 30%); transform: translate(-50%,-50%); animation: fx-target var(--fx-loop) cubic-bezier(.2,.9,.2,1) both; }
+.effect-deduce .cut-in-card .art-window { animation-name: fx-strike; }
+.effect-peek { background: radial-gradient(ellipse at 28% 48%, #8bc3de 0 9%, #315f82 34%, #102836 68%); }
+.effect-peek::before { inset: 0; background: linear-gradient(#071b27 0 28%, transparent 29% 71%, #071b27 72%); animation: fx-iris var(--fx-loop) ease-in-out both; }
+.effect-peek .cut-in-card .art-window { animation-name: fx-peek; }
+.effect-swap .cut-in-speed { background: linear-gradient(145deg, transparent 42%, rgba(255,255,255,.3) 43% 46%, transparent 47%), linear-gradient(35deg, transparent 42%, rgba(255,255,255,.2) 43% 46%, transparent 47%); animation: fx-cross var(--fx-loop) ease-in-out both; }
+.effect-swap .cut-in-card .art-window { animation-name: fx-swap; }
+.effect-share .cut-in-particles i { border-radius: 50% 50% 8% 50%; background: #ffe7a9; border-color: white; animation-name: fx-gift; }
+.effect-share .cut-in-card .art-window { animation-name: fx-gift-card; }
+.effect-rotate::before { inset: -60%; background: repeating-conic-gradient(from 0deg, rgba(255,255,255,.2) 0 4deg, transparent 4deg 24deg); animation-direction: reverse; }
+.effect-rotate .cut-in-particles { animation: cut-rays var(--fx-loop) linear infinite; }.effect-rotate .cut-in-card .art-window { animation-name: fx-orbit; }
+.effect-rumor .cut-in-particles i { width: clamp(16px, 2.5vw, 34px); border-radius: 50%; background: rgba(255,255,255,.2); transform: none; animation-name: fx-bubble; }
+.effect-rumor .cut-in-card .art-window { animation-name: fx-whisper; }
+.effect-decoy .cut-in-emblem { transform: translateY(-48%) rotate(45deg); }.effect-decoy .cut-in-particles i { border-radius: 3px; animation-name: fx-shield-spark; }
+.effect-decoy .cut-in-card .art-window { animation-name: fx-shield; }
+.effect-observe .cut-in-speed { inset: 0 auto 0 22%; width: 5px; background: white; box-shadow: 0 0 30px 12px color-mix(in srgb, var(--effect-accent) 70%, white); animation: fx-scan var(--fx-loop) ease-in-out both; }
+.effect-observe .cut-in-card .art-window { animation-name: fx-focus; }
+.effect-again::before { animation-direction: reverse; }.effect-again .cut-in-emblem { animation-name: fx-rewind; }.effect-again .cut-in-card .art-window { animation-name: fx-recall; }
+.effect-chaos { background: conic-gradient(from 20deg at 50% 50%, #76508e, #b06b42, #467fa0, #76508e, #263c38); }
+.effect-chaos::before { background: repeating-linear-gradient(35deg, rgba(255,255,255,.2) 0 8px, transparent 8px 40px); animation-name: fx-chaos-bg; }
+.effect-chaos .cut-in-particles i { border-radius: 50% 0 50% 0; animation-name: fx-chaos-piece; }.effect-chaos .cut-in-card .art-window { animation-name: fx-chaos-card; }
+.effect-ally { background: radial-gradient(circle at 25% 50%, #a47abb, #4a2b59 52%, #1e1424); }.effect-ally .cut-in-emblem { color: rgba(255,224,157,.16); }.effect-ally .cut-in-particles i { background: #f1cf7a; animation-name: fx-ally; }
+.effect-ally .cut-in-card .art-window { animation-name: fx-oath; }
+.effect-footprint .cut-in-particles i { width: clamp(8px, 1.2vw, 14px); height: clamp(17px, 2.5vw, 28px); border-radius: 55% 55% 45% 45%; transform: rotate(28deg); animation-name: fx-step; }
+.effect-footprint .cut-in-particles i:nth-child(even) { transform: rotate(-28deg); }.effect-footprint .cut-in-card .art-window { animation-name: fx-track; }
+
+@keyframes cut-enter { from { opacity: 0; transform: translateX(22%) scale(.88) rotate(1deg); } to { opacity: 1; transform: none; } }
+@keyframes cut-bg { 0% { opacity: 0; } 10%, 80% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes cut-rays { to { transform: rotate(18deg); } }
+@keyframes cut-sweep { 0% { transform: translateX(0) skewX(-18deg); opacity: 0; } 20% { opacity: 1; } 100% { transform: translateX(780%) skewX(-18deg); opacity: 0; } }
+@keyframes speed-lines { to { transform: translateX(-45px) skewX(-10deg); } }
+@keyframes emblem-pop { 0% { opacity: 0; transform: translateY(-48%) rotate(-18deg) scale(.55); } 45% { opacity: 1; transform: translateY(-48%) rotate(-5deg) scale(1.06); } 100% { opacity: .7; transform: translateY(-48%) rotate(-8deg) scale(1); } }
+@keyframes particle-rise { 0% { opacity: 0; translate: 0 30px; scale: .2; } 32% { opacity: 1; } 100% { opacity: 0; translate: 12px -80px; scale: 1.3; rotate: 120deg; } }
+@keyframes fx-bounce { 0% { opacity: 0; transform: translateX(-35%) rotate(-14deg) scale(.7); } 42% { opacity: 1; transform: translateX(3%) rotate(1deg) scale(1.06); } 65%, 100% { opacity: 1; transform: rotate(-4deg); } }
+@keyframes fx-pulse { from { opacity: 0; transform: scale(.4); } 55% { opacity: .7; } to { opacity: 0; transform: scale(1.45); } }
+@keyframes fx-target { 0% { opacity: 0; transform: translate(-50%,-50%) scale(1.8) rotate(-30deg); } 48% { opacity: .8; transform: translate(-50%,-50%) scale(.95) rotate(0); } 70%,100% { opacity: .45; transform: translate(-50%,-50%) scale(1); } }
+@keyframes fx-strike { 0% { opacity: 0; transform: translateX(-55%) rotate(-12deg) scale(.65); } 42% { opacity: 1; transform: translateX(5%) rotate(2deg) scale(1.1); } 58%,100% { opacity: 1; transform: rotate(-4deg); } }
+@keyframes fx-iris { 0%,100% { clip-path: inset(48% 0); } 45%,78% { clip-path: inset(0); } }
+@keyframes fx-peek { 0% { opacity: 0; transform: translateX(-30%) rotate(-10deg) scale(.65); clip-path: inset(0 50%); } 50%,100% { opacity: 1; transform: rotate(-4deg); clip-path: inset(0); } }
+@keyframes fx-cross { 0% { transform: translateX(-25%) scale(1.3); opacity: 0; } 45% { opacity: .8; } 100% { transform: translateX(25%) scale(.9); opacity: .25; } }
+@keyframes fx-swap { 0% { opacity: 0; transform: translateX(75%) rotate(14deg) scale(.7); } 45% { opacity: 1; transform: translateX(-6%) rotate(-7deg) scale(1.08); } 70%,100% { opacity: 1; transform: rotate(-4deg); } }
+@keyframes fx-gift { 0% { opacity: 0; translate: -45px 35px; scale: .2; } 45% { opacity: 1; } 100% { opacity: 0; translate: 55px -55px; rotate: 180deg; } }
+@keyframes fx-gift-card { 0% { opacity: 0; transform: translateY(38%) rotate(-12deg) scale(.7); } 45% { opacity: 1; transform: translateY(-4%) rotate(1deg) scale(1.05); } 70%,100% { opacity: 1; transform: rotate(-4deg); } }
+@keyframes fx-orbit { 0% { opacity: 0; transform: rotate(-155deg) translateX(-70px) rotate(155deg) scale(.5); } 55% { opacity: 1; transform: rotate(10deg) translateX(0) rotate(-10deg) scale(1.05); } 75%,100% { opacity: 1; transform: rotate(-4deg); } }
+@keyframes fx-bubble { 0% { opacity: 0; translate: 0 28px; scale: .2; } 40% { opacity: .8; } 100% { opacity: 0; translate: 10px -70px; scale: 1.4; } }
+@keyframes fx-whisper { 0% { opacity: 0; transform: translateX(-30%) rotate(-8deg) scale(.75); } 40% { opacity: 1; transform: translateX(2%) rotate(-2deg) scale(1.02); } 55% { transform: translateX(-2%) rotate(-5deg); } 70%,100% { opacity: 1; transform: rotate(-4deg); } }
+@keyframes fx-shield { 0% { opacity: 0; transform: scale(.25) rotate(18deg); } 38% { opacity: 1; transform: scale(1.16) rotate(-8deg); } 54%,100% { opacity: 1; transform: scale(1) rotate(-4deg); } }
+@keyframes fx-shield-spark { 0% { opacity: 0; translate: 0 0; scale: .2; } 40% { opacity: 1; } 100% { opacity: 0; translate: 45px -40px; scale: 1.4; } }
+@keyframes fx-scan { 0% { opacity: 0; transform: translateX(-35vw); } 25% { opacity: 1; } 82% { opacity: 1; transform: translateX(65vw); } 100% { opacity: 0; transform: translateX(75vw); } }
+@keyframes fx-focus { 0% { opacity: 0; transform: scale(1.35) rotate(-4deg); filter: blur(8px); } 48%,100% { opacity: 1; transform: scale(1) rotate(-4deg); filter: none; } }
+@keyframes fx-rewind { 0% { opacity: 0; transform: translateY(-48%) rotate(90deg) scale(.5); } 60%,100% { opacity: .8; transform: translateY(-48%) rotate(-8deg) scale(1); } }
+@keyframes fx-recall { 0% { opacity: 0; transform: translateX(55%) rotate(16deg) scale(.55); } 55% { opacity: 1; transform: translateX(-4%) rotate(-7deg) scale(1.05); } 75%,100% { opacity: 1; transform: rotate(-4deg); } }
+@keyframes fx-chaos-bg { to { transform: translate(40px,-30px) rotate(4deg) scale(1.1); } }
+@keyframes fx-chaos-piece { 0% { opacity: 0; translate: 0 0; rotate: 0deg; } 30% { opacity: 1; } 100% { opacity: 0; translate: 55px -80px; rotate: 360deg; scale: 1.8; } }
+@keyframes fx-chaos-card { 0% { opacity: 0; transform: translate(-30%,20%) rotate(-35deg) scale(.5); } 38% { opacity: 1; transform: translate(7%,-3%) rotate(9deg) scale(1.12); } 50% { transform: translate(-5%,2%) rotate(-10deg); } 62%,100% { opacity: 1; transform: rotate(-4deg); } }
+@keyframes fx-ally { 0% { opacity: 0; translate: 0 25px; scale: .2; } 45% { opacity: 1; } 100% { opacity: 0; translate: 0 -75px; scale: 1.4; rotate: 90deg; } }
+@keyframes fx-oath { 0% { opacity: 0; transform: translateY(40%) scale(.72) rotate(-4deg); filter: brightness(2); } 48%,100% { opacity: 1; transform: rotate(-4deg); filter: none; } }
+@keyframes fx-step { 0% { opacity: 0; translate: -25px 35px; scale: .4; } 35%,65% { opacity: 1; } 100% { opacity: 0; translate: 60px -55px; scale: 1.1; } }
+@keyframes fx-track { 0% { opacity: 0; transform: translateX(-45%) rotate(-9deg) scale(.68); } 45% { opacity: 1; transform: translateX(3%) rotate(0) scale(1.06); } 70%,100% { opacity: 1; transform: rotate(-4deg); } }
+@keyframes fx-fail { 0% { opacity: 0; transform: translateX(-35%) rotate(-12deg) scale(.7); } 35% { opacity: 1; transform: translateX(5%) rotate(3deg) scale(1.05); } 48% { transform: translateX(-4%) rotate(-7deg); } 60%,100% { opacity: 1; transform: rotate(-4deg); } }
 
 @media (min-width: 760px) {
   .site-header { height: 76px; padding-inline: 28px; }
@@ -273,6 +344,9 @@ main { min-height: calc(100vh - 64px); }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  .card-cut-in { animation: none !important; opacity: 1; }
+  .card-cut-in::before, .card-cut-in::after, .cut-in-speed, .cut-in-emblem, .cut-in-particles, .cut-in-card, .cut-in-card .art-window { animation: none !important; }
+  .cut-in-card .art-window { opacity: 1; transform: rotate(-4deg); filter: none; }
 }
 
 /* 2026 visual refresh */

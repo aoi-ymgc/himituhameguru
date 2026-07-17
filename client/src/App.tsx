@@ -24,6 +24,22 @@ const CHARACTER_ART: Record<CharacterId, string> = {
   penguin: "/assets/characters/icons/penguin.png?v=visual3",
 };
 
+const CUT_IN_SYMBOLS: Record<CardType, string> = {
+  secret: "?",
+  deduce: "!",
+  peek: "◉",
+  swap: "⇄",
+  share: "◇",
+  rotate: "↻",
+  rumor: "…",
+  decoy: "◆",
+  observe: "◎",
+  again: "↶",
+  chaos: "✦",
+  ally: "◆",
+  footprint: "•••",
+};
+
 const roomCodeFromPath = () => window.location.pathname.match(/^\/room\/([A-Z2-9]{6})/i)?.[1]?.toUpperCase() ?? "";
 const sessionKey = (code: string) => `himitsu-session:${code}`;
 const withSan = (name: string) => name.endsWith("さん") ? name : `${name}さん`;
@@ -498,7 +514,7 @@ function GameCard({ card, disabled, onClick }: { card: CardView; disabled: boole
 function CardCutIn({ effect, fast }: { effect: CardEffectEvent; fast: boolean }) {
   const definition = CARD_DEFINITIONS[effect.card];
   const failed = effect.outcome === "deduce-failed";
-  return <div className={`card-cut-in category-${definition.category} ${failed ? "result-failure" : ""} ${fast ? "fast" : ""}`} role="status" aria-live="assertive"><div className="cut-in-speed" /><div className="cut-in-card"><Art type={effect.card} /><div><span>{failed ? `${withSan(effect.actorName)}の推理結果` : `${withSan(effect.actorName)}が使用`}</span><strong>{failed ? "みぬけなかった！" : definition.name}</strong><p>{failed && effect.targetName ? `${withSan(effect.targetName)}は「ひみつ」を持っていません` : definition.cutInText}</p>{!failed && effect.targetPublic && effect.targetName && <small>対象：{withSan(effect.targetName)}</small>}</div></div></div>;
+  return <div className={`card-cut-in effect-${effect.card} category-${definition.category} ${failed ? "result-failure" : ""} ${fast ? "fast" : ""}`} style={{ "--effect-accent": definition.accent } as CSSProperties} role="status" aria-live="assertive"><div className="cut-in-speed" /><div className="cut-in-emblem" aria-hidden="true">{failed ? "×" : CUT_IN_SYMBOLS[effect.card]}</div><div className="cut-in-particles" aria-hidden="true">{Array.from({ length: 8 }, (_, index) => <i key={index} />)}</div><div className="cut-in-card"><Art type={effect.card} /><div><span>{failed ? `${withSan(effect.actorName)}の推理結果` : `${withSan(effect.actorName)}が使用`}</span><strong>{failed ? "みぬけなかった！" : definition.name}</strong><p>{failed && effect.targetName ? `${withSan(effect.targetName)}は「ひみつ」を持っていません` : definition.cutInText}</p>{!failed && effect.targetPublic && effect.targetName && <small>対象：{withSan(effect.targetName)}</small>}</div></div></div>;
 }
 
 function MiniCard({ type }: { type: CardType }) {
