@@ -16,11 +16,11 @@ const CHARACTER_NAMES: Record<CharacterId, string> = {
 };
 
 const CHARACTER_ART: Record<CharacterId, string> = {
-  sheep: CARD_DEFINITIONS.rumor.art,
-  hamster: CARD_DEFINITIONS.share.art,
-  tanuki: CARD_DEFINITIONS.deduce.art,
-  wolf: CARD_DEFINITIONS.peek.art,
-  penguin: CARD_DEFINITIONS.again.art,
+  sheep: "/assets/characters/icons/sheep.png?v=visual3",
+  hamster: "/assets/characters/icons/hamster.png?v=visual3",
+  tanuki: "/assets/characters/icons/tanuki.png?v=visual3",
+  wolf: "/assets/characters/icons/wolf.png?v=visual3",
+  penguin: "/assets/characters/icons/penguin.png?v=visual3",
 };
 
 const roomCodeFromPath = () => window.location.pathname.match(/^\/room\/([A-Z2-9]{6})/i)?.[1]?.toUpperCase() ?? "";
@@ -172,9 +172,9 @@ function Shell({ children, soundOn, onSound }: { children: ReactNode; soundOn: b
     <div className="app-shell">
       <header className="site-header">
         <button className="brand" onClick={() => window.location.assign("/")} aria-label="トップへ戻る">
-          <span className="brand-mark">?</span><span>{GAME_TITLE}</span>
+          <span className="brand-mark"><img src="/assets/characters/icons/sheep.png?v=visual3" alt="" /></span><span>{GAME_TITLE}</span>
         </button>
-        <button className="icon-button" onClick={onSound} aria-label={soundOn ? "音をオフ" : "音をオン"}>{soundOn ? "♪" : "×"}</button>
+        <button className="icon-button" onClick={onSound} aria-label={soundOn ? "音をオフ" : "音をオン"}>音 {soundOn ? "ON" : "OFF"}</button>
       </header>
       <main>{children}</main>
     </div>
@@ -203,27 +203,28 @@ function EntryScreen({ mode, setMode, onEnter, busy, error, onHowTo }: {
         <span className="eyebrow">3〜8人のオンライン推理ゲーム</span>
         <h1>そのひみつ、<br /><em>いま誰の手に？</em></h1>
         <p>カードを見て、交換して、惑わせて。めぐり続ける「ひみつ」の現在地を見ぬこう。</p>
-        <div className="hero-characters" aria-hidden="true">
-          {(["sheep", "hamster", "tanuki", "penguin"] as CharacterId[]).map((id) => <Avatar key={id} character={id} />)}
-        </div>
+        <div className="hero-facts"><span>会員登録なし</span><span>スマホ対応</span><span>1ゲーム約10分</span></div>
       </div>
-      <div className="entry-card">
-        {mode === "home" ? (
-          <>
-            <Button onClick={() => setMode("create")}>部屋を作る</Button>
-            <Button variant="secondary" onClick={() => setMode("join")}>部屋に参加</Button>
-            <Button variant="ghost" onClick={onHowTo}>遊び方</Button>
-          </>
-        ) : (
-          <form onSubmit={submit}>
-            <button className="back-link" type="button" onClick={() => setMode("home")}>← 戻る</button>
-            <h2>{mode === "create" ? "新しい部屋" : "部屋に参加"}</h2>
-            {mode === "join" && <Field label="6桁のルームコード" value={code} onChange={(value) => setCode(value.replace(/[^a-z0-9]/gi, "").slice(0, 6).toUpperCase())} placeholder="ABC123" autoFocus={!code} />}
-            <Field label="プレイヤー名" value={name} onChange={setName} placeholder="おなまえ" autoFocus={Boolean(code) || mode === "create"} maxLength={16} />
-            {error && <p className="form-error" role="alert">{error}</p>}
-            <Button type="submit" disabled={busy || !name.trim() || (mode === "join" && code.length !== 6)}>{busy ? "接続中…" : mode === "create" ? "部屋を作成" : "参加する"}</Button>
-          </form>
-        )}
+      <div className="hero-stage">
+        <img className="hero-key-visual" src="/assets/pages/top/hero.png?v=visual3" alt="5人のキャラクターがひみつカードをめぐらせている様子" />
+        <div className="entry-card">
+          {mode === "home" ? (
+            <>
+              <Button onClick={() => setMode("create")}>部屋を作る</Button>
+              <Button variant="secondary" onClick={() => setMode("join")}>部屋に参加</Button>
+              <Button variant="ghost" onClick={onHowTo}>遊び方を見る</Button>
+            </>
+          ) : (
+            <form onSubmit={submit}>
+              <button className="back-link" type="button" onClick={() => setMode("home")}>← 戻る</button>
+              <h2>{mode === "create" ? "新しい部屋" : "部屋に参加"}</h2>
+              {mode === "join" && <Field label="6桁のルームコード" value={code} onChange={(value) => setCode(value.replace(/[^a-z0-9]/gi, "").slice(0, 6).toUpperCase())} placeholder="ABC123" autoFocus={!code} />}
+              <Field label="プレイヤー名" value={name} onChange={setName} placeholder="おなまえ" autoFocus={Boolean(code) || mode === "create"} maxLength={16} />
+              {error && <p className="form-error" role="alert">{error}</p>}
+              <Button type="submit" disabled={busy || !name.trim() || (mode === "join" && code.length !== 6)}>{busy ? "接続中…" : mode === "create" ? "部屋を作成" : "参加する"}</Button>
+            </form>
+          )}
+        </div>
       </div>
     </section>
   );
@@ -251,10 +252,8 @@ function Lobby({ room, invoke, busy, onHowTo }: { room: RoomView; invoke: <T>(ev
       </div>
       <div className="lobby-grid">
         <section className="panel invite-panel">
-          <p className="panel-label">ルームコード</p>
-          <strong className="room-code">{room.code}</strong>
-          <p>このURLかQRコードを友だちに共有してください。</p>
-          <div className="button-row"><Button onClick={copy}>{copied ? "コピーしました！" : "招待URLをコピー"}</Button><Button variant="secondary" onClick={() => setShowQr(true)}>QRコード</Button></div>
+          <div className="invite-copy"><p className="panel-label">ルームコード</p><strong className="room-code">{room.code}</strong><p>このURLかQRコードを友だちに共有してください。</p><div className="button-row"><Button onClick={copy}>{copied ? "コピーしました！" : "招待URLをコピー"}</Button><Button variant="secondary" onClick={() => setShowQr(true)}>QRコード</Button></div></div>
+          <img className="lobby-visual" src="/assets/pages/lobby/waiting.png?v=visual3" alt="ひつじが友だちを待っている様子" />
         </section>
         <section className="panel members-panel">
           <div className="panel-title"><h2>参加者</h2><span>{room.players.length} / {room.settings.maxPlayers}人</span></div>
@@ -421,7 +420,7 @@ function HowToModal({ onClose }: { onClose: () => void }) {
   const categories = Object.keys(CARD_CATEGORY_LABELS) as CardCategory[];
   const cards = CARD_TYPES.filter((type) => category === "all" || CARD_DEFINITIONS[type].category === category);
   return <Modal title="遊び方・カード一覧" onClose={onClose}><div className="howto">
-    <div className="rule-lead"><span>?</span><p>たった1枚の「ひみつ」が、交換カードでみんなの手をめぐります。</p></div>
+    <div className="rule-lead"><img src="/assets/pages/help/guide.png?v=visual3" alt="ひつじがカードのめぐり方を案内している様子" /><p>たった1枚の「ひみつ」が、交換カードでみんなの手をめぐります。</p></div>
     <section><h3>勝ち方</h3><ol><li><strong>自分の番にカードを1枚使う</strong><span>情報を集め、交換で現在地を揺らします。</span></li><li><strong>「みぬく」で持ち主を指名</strong><span>当てれば指名した人の勝ちです。</span></li><li><strong>最後まで逃げ切る</strong><span>使えるカードがなくなれば、最後の持ち主が勝ちです。</span></li></ol></section>
     <section><h3>席順と左どなり</h3><div className="howto-order"><b>席1</b><span>→</span><b>席2</b><span>→</span><b>席3</b><span>→</span><b>席1</b></div><p className="muted">ターンも「ぐるっと回す」の移動も、席番号が増える向きです。自分の次の席が左どなり、前の席が右どなりです。</p></section>
     <section><h3>全11種類のカード</h3><div className="category-filter"><button className={category === "all" ? "active" : ""} onClick={() => setCategory("all")}>すべて</button>{categories.map((item) => <button key={item} className={category === item ? "active" : ""} onClick={() => setCategory(item)}>{CARD_CATEGORY_LABELS[item]}</button>)}</div><div className="card-catalog">{cards.map((type) => { const def = CARD_DEFINITIONS[type]; return <button key={type} onClick={() => setDetail(detail === type ? null : type)}><Art type={type} /><div><span className={`category-badge category-${def.category}`}>{CARD_CATEGORY_LABELS[def.category]}</span><strong>{def.name}</strong><small>{def.shortDescription}</small></div>{detail === type && <p>{def.description}</p>}</button>; })}</div></section>
@@ -431,7 +430,7 @@ function HowToModal({ onClose }: { onClose: () => void }) {
 
 function GameCard({ card, disabled, onClick }: { card: CardView; disabled: boolean; onClick: () => void }) {
   const definition = CARD_DEFINITIONS[card.type];
-  return <button className={`game-card ${disabled ? "disabled" : ""}`} onClick={onClick} style={{ "--card-accent": definition.accent } as CSSProperties}><Art type={card.type} /><span className={`category-badge category-${definition.category}`}>{CARD_CATEGORY_LABELS[definition.category]}</span><span className="game-card-name">{definition.name}</span><span className="game-card-hint">{definition.shortDescription}</span></button>;
+  return <button className={`game-card category-${definition.category} ${disabled ? "disabled" : ""}`} onClick={onClick} style={{ "--card-accent": definition.accent } as CSSProperties}><span className="card-category-ribbon">{CARD_CATEGORY_LABELS[definition.category]}</span><Art type={card.type} /><span className="game-card-copy"><strong className="game-card-name">{definition.name}</strong><span className="game-card-hint">{definition.shortDescription}</span></span></button>;
 }
 
 function CardCutIn({ effect, fast }: { effect: CardEffectEvent; fast: boolean }) {
