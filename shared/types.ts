@@ -15,7 +15,7 @@ export interface PlayerView {
   connected: boolean;
   handCount: number;
   isTurn: boolean;
-  protected: boolean;
+  isAlly: boolean;
   seat: number;
 }
 
@@ -33,7 +33,7 @@ export interface ActionOption {
 
 export interface PendingView {
   id: string;
-  kind: "select-player" | "select-card" | "rotate" | "waiting";
+  kind: "select-player" | "select-card" | "rotate" | "no-effect" | "waiting";
   prompt: string;
   options: ActionOption[];
   selectedCount?: number;
@@ -41,6 +41,17 @@ export interface PendingView {
   cancellable?: boolean;
   card?: CardType;
   expiresAt?: number;
+}
+
+export interface ResultPlayer {
+  id: string;
+  name: string;
+}
+
+export interface GameResultRoles {
+  secretHolder: ResultPlayer;
+  allies: ResultPlayer[];
+  detectives: ResultPlayer[];
 }
 
 export interface CardEffectEvent {
@@ -54,6 +65,9 @@ export interface CardEffectEvent {
 }
 
 export interface GameResult {
+  winningSide: "detective" | "secret";
+  winners: ResultPlayer[];
+  roles: GameResultRoles;
   winnerId: string;
   winnerName: string;
   secretHolderId: string;
@@ -64,7 +78,7 @@ export interface GameResult {
 
 export interface RoomView {
   code: string;
-  status: "lobby" | "playing" | "finished";
+  status: "lobby" | "incident" | "playing" | "finished";
   viewerId: string;
   hostId: string;
   settings: GameSettings;
@@ -77,6 +91,8 @@ export interface RoomView {
   turnDirection: "clockwise";
   nextPlayerId: string | null;
   firstRoundComplete: boolean;
+  firstFinderId: string | null;
+  incidentTitle: string | null;
   pending: PendingView | null;
   result: GameResult | null;
 }

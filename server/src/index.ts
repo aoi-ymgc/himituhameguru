@@ -5,6 +5,7 @@ import path from "node:path";
 import { Server, type Socket } from "socket.io";
 import { z } from "zod";
 import type { Ack, GameSettings } from "../../shared/types.js";
+import { INCIDENT_TEMPLATES } from "../../shared/incidents.js";
 import {
   addPlayer,
   cancelAction,
@@ -15,6 +16,7 @@ import {
   returnToLobby,
   roomView,
   startGame,
+  submitIncident,
   submitAction,
   timeoutTurn,
   updateSettings,
@@ -39,6 +41,7 @@ const settingsSchema = z.object({
   turnSeconds: z.union([z.literal(0), z.literal(30), z.literal(60), z.literal(90)]).optional(),
   animationSpeed: z.enum(["normal", "fast"]).optional(),
 });
+const incidentSchema = z.object({ title: z.string().trim().min(1, "今回の事件を入力してください").max(80, "事件名は80文字以内です") });
 const idSchema = z.string().uuid();
 
 app.disable("x-powered-by");
@@ -131,6 +134,15 @@ io.on("connection", (socket) => {
     safeAck(ack, () => {
       const room = roomForSocket(socket);
       startGame(room, socket.data.playerId);
+      publish(room);
+    });
+  });
+
+  socket.on("submitIncident", (input, ack: (result: Ack) => void) => {
+    safeAck(ack, () => {
+      const room = roomForSocket(socket);
+      const { title } = incidentSchema.parse(input);
+      submitIncident(room, socket.data.playerId, title);
       publish(room);
     });
   });
@@ -264,7 +276,17 @@ function publish(room: RoomInternal, outcome?: ActionOutcome): void {
     }
   }
 
-  if (room.status === "playing" && room.pending) {
+  if (room.status === "incident") {
+    const timer = setTimeout(() => {
+      const latest = rooms.get(room.code);
+      if (!latest || latest.status !== "incident" || !latest.firstFinderId) return;
+      const title = INCIDENT_TEMPLATES[Math.floor(Math.random() * INCIDENT_TEMPLATES.length)];
+      submitIncident(latest, latest.firstFinderId, title);
+      publish(latest);
+    }, 90_000);
+    timer.unref();
+    roomTimers.set(room.code, timer);
+  } else if (room.status === "playing" && room.pending) {
     room.turnEndsAt = null;
     const delay = Math.max(0, room.pending.expiresAt - Date.now());
     const timer = setTimeout(() => {

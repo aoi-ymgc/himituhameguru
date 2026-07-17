@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
 import QRCode from "qrcode";
-import { CARD_CATEGORY_LABELS, CARD_DEFINITIONS, CARD_TYPES, type CardCategory, type CardType, type CharacterId } from "../../shared/cards";
+import { CARD_CATEGORY_LABELS, CARD_DEFINITIONS, CARD_TYPES, START_CARD_DEFINITION, type CardCategory, type CardType, type CharacterId } from "../../shared/cards";
+import { INCIDENT_TEMPLATES } from "../../shared/incidents";
 import { GAME_TITLE, type Ack, type CardEffectEvent, type CardView, type GameSettings, type RoomView } from "../../shared/types";
 import { socket } from "./main";
 
@@ -37,6 +38,7 @@ export default function App() {
   const [privateNotice, setPrivateNotice] = useState<Notice | null>(null);
   const [noticeQueue, setNoticeQueue] = useState<Notice[]>([]);
   const [cutIn, setCutIn] = useState<CardEffectEvent | null>(null);
+  const [effectQueue, setEffectQueue] = useState<CardEffectEvent[]>([]);
   const [soundOn, setSoundOn] = useState(() => localStorage.getItem("himitsu-sound") !== "off");
   const previousTurn = useRef<string | null>(null);
   const roomRef = useRef<RoomView | null>(null);
@@ -74,10 +76,7 @@ export default function App() {
       setNoticeQueue((queue) => [...queue, notice]);
     };
     const onEffect = (effect: CardEffectEvent) => {
-      setCutIn(effect);
-      signal(soundOn, "reveal");
-      const duration = roomRef.current?.settings.animationSpeed === "fast" ? 850 : 1450;
-      window.setTimeout(() => setCutIn((current) => current?.id === effect.id ? null : current), duration);
+      setEffectQueue((queue) => [...queue, effect]);
     };
     const onKicked = (message: string) => {
       const code = roomCodeFromPath();
@@ -101,6 +100,17 @@ export default function App() {
       socket.off("kicked", onKicked);
     };
   }, [soundOn]);
+
+  useEffect(() => {
+    if (cutIn || effectQueue.length === 0) return;
+    const next = effectQueue[0];
+    setEffectQueue((queue) => queue.slice(1));
+    setCutIn(next);
+    signal(soundOn, "reveal");
+    const duration = roomRef.current?.settings.animationSpeed === "fast" ? 850 : 1450;
+    const timer = window.setTimeout(() => setCutIn(null), duration);
+    return () => window.clearTimeout(timer);
+  }, [cutIn, effectQueue, soundOn]);
 
   useEffect(() => {
     if (cutIn || privateNotice || noticeQueue.length === 0) return;
@@ -158,6 +168,7 @@ export default function App() {
     <Shell soundOn={soundOn} onSound={toggleSound}>
       {error && <div className="error-banner" role="alert">{error}<button onClick={() => setError("")}>閉じる</button></div>}
       {room.status === "lobby" && <Lobby room={room} invoke={invoke} busy={busy} onHowTo={() => setHowTo(true)} />}
+      {room.status === "incident" && <IncidentAnnouncement room={room} invoke={invoke} busy={busy} />}
       {room.status === "playing" && <Game room={room} invoke={invoke} selectedCard={selectedCard} setSelectedCard={setSelectedCard} busy={busy || Boolean(cutIn)} onHowTo={() => setHowTo(true)} />}
       {room.status === "finished" && <Game room={room} invoke={invoke} selectedCard={null} setSelectedCard={setSelectedCard} busy={busy || Boolean(cutIn)} onHowTo={() => setHowTo(true)} />}
       {howTo && <HowToModal onClose={() => setHowTo(false)} />}
@@ -286,6 +297,32 @@ function Lobby({ room, invoke, busy, onHowTo }: { room: RoomView; invoke: <T>(ev
   );
 }
 
+function IncidentAnnouncement({ room, invoke, busy }: { room: RoomView; invoke: <T>(event: string, payload?: unknown) => Promise<T | undefined>; busy: boolean }) {
+  const firstFinder = room.players.find((player) => player.id === room.firstFinderId)!;
+  const canAnnounce = room.viewerId === firstFinder.id || (room.viewerId === room.hostId && !firstFinder.connected);
+  const randomIncident = () => INCIDENT_TEMPLATES[Math.floor(Math.random() * INCIDENT_TEMPLATES.length)];
+  const [title, setTitle] = useState(randomIncident);
+  return (
+    <section className="incident-layout page-width">
+      <div className="incident-card panel">
+        <div className="start-card-art"><img src={START_CARD_DEFINITION.art} alt="最初の発見者カード" /></div>
+        <span className="eyebrow">ゲーム前の事件発表タイム</span>
+        <h1>「{START_CARD_DEFINITION.name}」を<br />{withSan(firstFinder.name)}が受け取りました</h1>
+        <p>{START_CARD_DEFINITION.description}</p>
+        {canAnnounce ? (
+          <div className="incident-form">
+            <Field label="今回、起きた事件は？" value={title} onChange={setTitle} placeholder="例：冷蔵庫のプリンが消えた！" maxLength={80} />
+            <div className="button-row"><Button variant="secondary" disabled={busy} onClick={() => setTitle(randomIncident())}>別のお題にする</Button><Button disabled={busy || !title.trim()} onClick={() => invoke("submitIncident", { title })}>この事件を発表して開始</Button></div>
+            <small>自由に書き換えても、用意された{INCIDENT_TEMPLATES.length}個のお題から選んでも遊べます。</small>
+          </div>
+        ) : (
+          <div className="incident-wait"><div className="waiting-dots"><i /><i /><i /></div><strong>{withSan(firstFinder.name)}が事件を考えています</strong><p>発表が終わると、同じ人のターンから始まります。</p></div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function Game({ room, invoke, selectedCard, setSelectedCard, busy, onHowTo }: {
   room: RoomView;
   invoke: <T>(event: string, payload?: unknown) => Promise<T | undefined>;
@@ -312,6 +349,8 @@ function Game({ room, invoke, selectedCard, setSelectedCard, busy, onHowTo }: {
 
   return (
     <section className="game-layout">
+      {room.incidentTitle && <div className="incident-ribbon"><span>今回の事件</span><strong>{room.incidentTitle}</strong></div>}
+      {me.isAlly && <div className="ally-banner">あなたはひみつ側のなかまです</div>}
       <div className="turn-banner">
         <div><span>TURN {room.turnNumber} ・ 席順どおり</span><strong>{room.status === "finished" ? "ゲーム終了" : me.isTurn ? "あなたの番です" : `${withSan(current?.name ?? "")}の番`}</strong><small>{next ? `次は ${withSan(next.name)}` : ""}</small></div>
         <div className="turn-tools">{seconds !== null && <div className={`timer ${seconds <= 10 ? "timer-danger" : ""}`}>{seconds}</div>}<button onClick={onHowTo}>遊び方</button></div>
@@ -321,7 +360,7 @@ function Game({ room, invoke, selectedCard, setSelectedCard, busy, onHowTo }: {
           <div className={`player-chip ${player.isTurn ? "active" : ""} ${player.id === room.nextPlayerId ? "next" : ""}`}>
             <b className="seat-number">{player.seat}</b>
             <Avatar character={player.character} small />
-            <div><strong>{player.name}{player.id === room.viewerId ? "（あなた）" : ""}</strong><span>手札 {player.handCount}枚 {player.protected ? "・🛡 守られ中" : ""}</span></div>
+            <div><strong>{player.name}{player.id === room.viewerId ? "（あなた）" : ""}</strong><span>手札 {player.handCount}枚 {player.isAlly ? "・ひみつ側" : ""}</span></div>
             {player.isTurn ? <em className="turn-label">現在</em> : player.id === room.nextPlayerId ? <em className="next-label">次</em> : null}
             {!player.connected && <i>OFF</i>}
           </div>
@@ -371,7 +410,7 @@ function PendingAction({ room, invoke, busy }: { room: RoomView; invoke: <T>(eve
     return () => window.clearInterval(timer);
   }, [pending.expiresAt]);
   return (
-    <Modal title={actionable ? `${cardName}｜選択` : `${cardName}｜待機中`} lock={!pending.cancellable} onClose={cancel}>
+    <Modal title={pending.kind === "no-effect" ? "現在、このカードの効果を使用できません" : actionable ? `${cardName}｜選択` : `${cardName}｜待機中`} lock={!pending.cancellable} onClose={cancel}>
       <div className="pending-action">
         {pending.card && <div className="pending-card-summary"><span className={`category-badge category-${CARD_DEFINITIONS[pending.card].category}`}>{CARD_CATEGORY_LABELS[CARD_DEFINITIONS[pending.card].category]}</span><strong>{CARD_DEFINITIONS[pending.card].shortDescription}</strong></div>}
         <p>{pending.prompt}</p>
@@ -381,7 +420,7 @@ function PendingAction({ room, invoke, busy }: { room: RoomView; invoke: <T>(eve
           const type = option.meta as CardType | undefined;
           return <button key={option.id} disabled={busy} onClick={() => invoke("submitAction", { pendingId: pending.id, optionId: option.id })}>{type && <span className="option-card-dot" style={{ background: CARD_DEFINITIONS[type].accent }} />}{option.label}</button>;
         })}</div>}
-        {pending.cancellable && <Button variant="ghost" disabled={busy} onClick={cancel}>戻る（カードは使いません）</Button>}
+        {pending.cancellable && <Button variant="ghost" disabled={busy} onClick={cancel}>{pending.kind === "no-effect" ? "戻る" : "戻る（カードは使いません）"}</Button>}
         {!actionable && <div className="waiting-dots"><i /><i /><i /></div>}
       </div>
     </Modal>
@@ -396,8 +435,14 @@ function ResultModal({ room, invoke, busy }: { room: RoomView; invoke: <T>(event
       <div className="result-content">
         <span className="result-mark">!</span>
         <p>{result.reason === "deduced" ? "ひみつを見ぬいた！" : "ひみつを守りきった！"}</p>
-        <h2>{withSan(result.winnerName)}の勝ち</h2>
-        <dl><div><dt>最後のひみつ</dt><dd>{withSan(result.secretHolderName)}</dd></div><div><dt>ゲーム時間</dt><dd>{formatDuration(result.durationSeconds)}</dd></div></dl>
+        <h2>{result.winningSide === "secret" ? "ひみつ側" : "推理側"}の勝ち</h2>
+        <div className={`winning-side side-${result.winningSide}`}><span>勝者</span><strong>{result.winners.map((player) => withSan(player.name)).join("・")}</strong></div>
+        <dl>
+          <div><dt>最後のひみつ保持者</dt><dd>{withSan(result.roles.secretHolder.name)}</dd></div>
+          <div><dt>ひみつ側のなかま</dt><dd>{result.roles.allies.length ? result.roles.allies.map((player) => withSan(player.name)).join("・") : "なし"}</dd></div>
+          <div><dt>推理側</dt><dd>{result.roles.detectives.length ? result.roles.detectives.map((player) => withSan(player.name)).join("・") : "なし"}</dd></div>
+          <div><dt>ゲーム時間</dt><dd>{formatDuration(result.durationSeconds)}</dd></div>
+        </dl>
         {isHost ? <div className="result-actions"><Button disabled={busy} onClick={() => invoke("rematch")}>同じメンバーでもう一度</Button><Button variant="secondary" disabled={busy} onClick={() => invoke("returnToLobby")}>ロビーへ戻る</Button></div> : <p className="muted">ホストが次のゲームを選びます</p>}
         <Button variant="ghost" onClick={() => window.location.assign("/")}>トップへ戻る</Button>
       </div>
@@ -421,10 +466,10 @@ function HowToModal({ onClose }: { onClose: () => void }) {
   const cards = CARD_TYPES.filter((type) => category === "all" || CARD_DEFINITIONS[type].category === category);
   return <Modal title="遊び方・カード一覧" onClose={onClose}><div className="howto">
     <div className="rule-lead"><img src="/assets/pages/help/guide.png?v=visual3" alt="ひつじがカードのめぐり方を案内している様子" /><p>たった1枚の「ひみつ」が、交換カードでみんなの手をめぐります。</p></div>
-    <section><h3>勝ち方</h3><ol><li><strong>自分の番にカードを1枚使う</strong><span>情報を集め、交換で現在地を揺らします。</span></li><li><strong>「みぬく」で持ち主を指名</strong><span>当てれば指名した人の勝ちです。</span></li><li><strong>最後まで逃げ切る</strong><span>使えるカードがなくなれば、最後の持ち主が勝ちです。</span></li></ol></section>
+    <section><h3>ゲームの流れと勝ち方</h3><ol><li><strong>「みつけた！」の人が事件を発表</strong><span>自由入力かランダムのお題を発表し、その人からゲームを始めます。</span></li><li><strong>自分の番にカードを1枚使う</strong><span>情報を集め、交換で現在地を揺らします。</span></li><li><strong>「みぬく」で持ち主を指名</strong><span>当たれば推理側、使い切れば最後の保持者となかまが共同勝利です。</span></li></ol></section>
     <section><h3>席順と左どなり</h3><div className="howto-order"><b>席1</b><span>→</span><b>席2</b><span>→</span><b>席3</b><span>→</span><b>席1</b></div><p className="muted">ターンも「ぐるっと回す」の移動も、席番号が増える向きです。自分の次の席が左どなり、前の席が右どなりです。</p></section>
-    <section><h3>全11種類のカード</h3><div className="category-filter"><button className={category === "all" ? "active" : ""} onClick={() => setCategory("all")}>すべて</button>{categories.map((item) => <button key={item} className={category === item ? "active" : ""} onClick={() => setCategory(item)}>{CARD_CATEGORY_LABELS[item]}</button>)}</div><div className="card-catalog">{cards.map((type) => { const def = CARD_DEFINITIONS[type]; return <button key={type} onClick={() => setDetail(detail === type ? null : type)}><Art type={type} /><div><span className={`category-badge category-${def.category}`}>{CARD_CATEGORY_LABELS[def.category]}</span><strong>{def.name}</strong><small>{def.shortDescription}</small></div>{detail === type && <p>{def.description}</p>}</button>; })}</div></section>
-    <p className="muted">カードの効果が確定する前の対象選択は「戻る」で取り消せます。手札の内容や非公開の対象者は、関係する本人にだけ通知されます。</p>
+    <section><h3>全{CARD_TYPES.length}種類のカード</h3><div className="category-filter"><button className={category === "all" ? "active" : ""} onClick={() => setCategory("all")}>すべて</button>{categories.map((item) => <button key={item} className={category === item ? "active" : ""} onClick={() => setCategory(item)}>{CARD_CATEGORY_LABELS[item]}</button>)}</div><div className="card-catalog">{cards.map((type) => { const def = CARD_DEFINITIONS[type]; return <button key={type} onClick={() => setDetail(detail === type ? null : type)}><Art type={type} /><div><span className={`category-badge category-${def.category}`}>{CARD_CATEGORY_LABELS[def.category]}</span><strong>{def.name}</strong><small>{def.shortDescription}</small></div>{detail === type && <p>{def.description}</p>}</button>; })}</div></section>
+    <p className="muted">カードの効果が成立しない場合だけ、確認後に効果なしで捨てて次へ進めます。「おとり」は手札にある間に自動発動し、自分の番では効果なしで捨てられます。対象選択は「戻る」で取り消せます。</p>
   </div></Modal>;
 }
 

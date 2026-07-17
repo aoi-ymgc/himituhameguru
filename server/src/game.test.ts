@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { CARD_DEFINITIONS, CARD_TYPES } from "../../shared/cards.js";
-import { addPlayer, buildDeck, cancelAction, createRoom, expirePending, playCard, roomView, startGame, submitAction, type CardInstance, type RoomInternal } from "./game.js";
+import { addPlayer, buildDeck, cancelAction, createRoom, expirePending, playCard, roomView, startGame, submitAction, submitIncident, type CardInstance, type RoomInternal } from "./game.js";
 
 const card = (type: CardInstance["type"], instanceId = crypto.randomUUID()): CardInstance => ({ type, instanceId });
 
@@ -9,6 +9,7 @@ function playingRoom(playerCount = 3): RoomInternal {
   const room = createRoom("ABC234", "ホスト", "socket-0");
   for (let index = 1; index < playerCount; index += 1) addPlayer(room, `プレイヤー${index + 1}`, `socket-${index}`);
   startGame(room, room.hostId, () => 0.4);
+  submitIncident(room, room.firstFinderId!, "テスト事件", () => 0.4);
   room.turnIndex = 0;
   room.turnNumber = playerCount + 1;
   room.players.forEach((player) => { player.turnsCompleted = 1; });
@@ -143,26 +144,34 @@ test("うわさは必ず現在のひみつ保持者を候補に含める", () =>
   assert.equal(room.logs.some((log) => log.text.includes("うわさの候補") && log.text.includes(room.players[3].name)), true);
 });
 
-test("おとり中のプレイヤーはみぬくの候補から除外される", () => {
+test("手札のおとりはみぬくを自動で防ぎ、双方を1枚ずつ捨てる", () => {
   const room = playingRoom();
-  room.players[0].hand = [card("decoy")];
-  room.players[1].hand = [card("deduce")];
-  room.players[2].hand = [card("secret"), card("peek")];
-  playCard(room, room.players[0].id, room.players[0].hand[0].instanceId);
-  submitAction(room, room.players[0].id, room.pending!.id, room.players[2].id);
-  playCard(room, room.players[1].id, room.players[1].hand[0].instanceId);
-  assert.equal(room.pending?.kind, "target");
-  if (room.pending?.kind === "target") assert.equal(room.pending.allowedTargetIds.includes(room.players[2].id), false);
-});
-
-test("もう一回は同じプレイヤーの番を続けるが連続使用できない", () => {
-  const room = playingRoom();
-  room.players[0].hand = [card("again"), card("again"), card("peek")];
-  room.players[1].hand = [card("secret"), card("swap")];
+  room.players[0].hand = [card("deduce")];
+  room.players[1].hand = [card("secret"), card("decoy"), card("decoy")];
   room.players[2].hand = [card("deduce")];
   playCard(room, room.players[0].id, room.players[0].hand[0].instanceId);
-  assert.equal(room.players[room.turnIndex].id, room.players[0].id);
-  assert.throws(() => playCard(room, room.players[0].id, room.players[0].hand.find((item) => item.type === "again")!.instanceId), /連続/);
+  const outcome = submitAction(room, room.players[0].id, room.pending!.id, room.players[1].id);
+  assert.equal(room.status, "playing");
+  assert.equal(room.players[1].hand.filter((item) => item.type === "decoy").length, 1);
+  assert.deepEqual(room.discard.slice(-2), ["deduce", "decoy"]);
+  assert.equal(outcome.effects.some((effect) => effect.card === "decoy"), true);
+});
+
+test("手もどしは自分が使った通常カードを1枚だけ回収する", () => {
+  const room = playingRoom();
+  room.players[0].hand = [card("peek"), card("again")];
+  room.players[1].hand = [card("secret"), card("rumor")];
+  room.players[2].hand = [card("deduce")];
+  playCard(room, room.players[0].id, room.players[0].hand[0].instanceId);
+  submitAction(room, room.players[0].id, room.pending!.id, room.players[1].id);
+  room.turnIndex = 0;
+  const again = room.players[0].hand.find((item) => item.type === "again")!;
+  playCard(room, room.players[0].id, again.instanceId);
+  assert.equal(room.pending?.kind, "recall");
+  const recallId = room.pending?.kind === "recall" ? room.pending.allowedRecordIds[0] : "";
+  submitAction(room, room.players[0].id, room.pending!.id, recallId);
+  assert.equal(room.players[0].hand.some((item) => item.type === "peek"), true);
+  assert.equal(room.discard.includes("peek"), false);
 });
 
 test("大混乱は各プレイヤーの枚数とひみつ1枚を維持する", () => {
@@ -178,7 +187,7 @@ test("大混乱は各プレイヤーの枚数とひみつ1枚を維持する", (
 });
 
 test("対象選択を戻るとカード・捨て札・ターン・ログが一切変わらない", () => {
-  for (const type of ["deduce", "peek", "swap", "share", "decoy", "observe"] as const) {
+  for (const type of ["deduce", "peek", "swap", "share", "observe", "footprint"] as const) {
     const room = playingRoom();
     room.players[0].hand = [card(type), card("rumor")];
     room.players[1].hand = [card("secret"), card("peek")];
@@ -251,7 +260,9 @@ test("みぬくは最初の1巡中に使えず、最後の1枚が外れると持
   const early = playingRoom();
   early.players[2].turnsCompleted = 0;
   early.players[0].hand = [card("deduce")];
-  assert.throws(() => playCard(early, early.players[0].id, early.players[0].hand[0].instanceId), /全員が1回/);
+  playCard(early, early.players[0].id, early.players[0].hand[0].instanceId);
+  assert.equal(early.pending?.kind, "no-effect");
+  assert.match(roomView(early, early.players[0].id).pending?.prompt ?? "", /全員が1回/);
 
   const last = playingRoom();
   last.players[0].hand = [card("deduce")];
@@ -263,28 +274,31 @@ test("みぬくは最初の1巡中に使えず、最後の1枚が外れると持
   assert.equal(last.result?.winnerId, last.players[2].id);
 });
 
-test("おとり使用者の手札が尽きても席を一周した時点で保護が切れる", () => {
+test("おとりは自分の番に効果なしで捨てられる", () => {
   const room = playingRoom();
   room.players[0].hand = [card("decoy")];
-  room.players[1].hand = [card("rumor"), card("peek")];
-  room.players[2].hand = [card("secret"), card("rumor")];
+  room.players[1].hand = [card("secret"), card("peek")];
+  room.players[2].hand = [card("deduce")];
   playCard(room, room.players[0].id, room.players[0].hand[0].instanceId);
-  submitAction(room, room.players[0].id, room.pending!.id, room.players[2].id);
-  assert.equal(room.players[2].protected, true);
-  playCard(room, room.players[1].id, room.players[1].hand.find((item) => item.type === "rumor")!.instanceId);
-  playCard(room, room.players[2].id, room.players[2].hand.find((item) => item.type === "rumor")!.instanceId);
-  assert.equal(room.players[2].protected, false);
+  assert.equal(room.pending?.kind, "no-effect");
+  submitAction(room, room.players[0].id, room.pending!.id, "confirm");
+  assert.equal(room.players[0].hand.length, 0);
+  assert.equal(room.discard.at(-1), "decoy");
 });
 
-test("成立する対象がいないカードは消費しない", () => {
+test("成立する対象がいない最後のおすそわけは確認後に効果なしで捨てられる", () => {
   const room = playingRoom();
-  room.players[0].hand = [card("swap")];
+  room.players[0].hand = [card("share")];
   room.players[1].hand = [card("secret")];
-  room.players[2].hand = [];
+  room.players[2].hand = [card("deduce")];
   const instanceId = room.players[0].hand[0].instanceId;
-  assert.throws(() => playCard(room, room.players[0].id, instanceId), /対象がいない/);
+  playCard(room, room.players[0].id, instanceId);
+  assert.equal(room.pending?.kind, "no-effect");
   assert.equal(room.players[0].hand[0].instanceId, instanceId);
-  assert.equal(room.discard.length, 0);
+  submitAction(room, room.players[0].id, room.pending!.id, "confirm");
+  assert.equal(room.players[0].hand.length, 0);
+  assert.equal(room.discard.at(-1), "share");
+  assert.equal(room.players[room.turnIndex].id, room.players[2].id);
 });
 
 test("pending期限で対象選択は取消、全員選択は自動完了する", () => {
@@ -306,4 +320,115 @@ test("pending期限で対象選択は取消、全員選択は自動完了する"
   expirePending(rotateRoom, () => 0);
   assert.equal(rotateRoom.pending, null);
   assert.equal(rotateRoom.players[1].hand.some((item) => item.type === "secret"), true);
+});
+
+test("なかまは公開状態になり、ひみつ側の逃げ切りで共同勝利する", () => {
+  const room = playingRoom(5);
+  const [ally, holder] = room.players;
+  ally.hand = [card("ally")];
+  holder.hand = [card("secret")];
+  room.players.slice(2).forEach((player) => { player.hand = []; });
+  playCard(room, ally.id, ally.hand[0].instanceId);
+  assert.equal(ally.isAlly, true);
+  assert.equal(room.status, "finished");
+  assert.equal(room.result?.winningSide, "secret");
+  assert.equal(room.result?.winners.some((winner) => winner.id === ally.id), true);
+  assert.equal(room.result?.winners.some((winner) => winner.id === holder.id), true);
+});
+
+test("なかま自身がひみつを持つ場合も勝者は重複しない", () => {
+  const room = playingRoom(5);
+  const ally = room.players[0];
+  ally.hand = [card("ally"), card("secret")];
+  room.players.slice(1).forEach((player) => { player.hand = []; });
+  playCard(room, ally.id, ally.hand[0].instanceId);
+  assert.equal(room.result?.winners.filter((winner) => winner.id === ally.id).length, 1);
+  assert.equal(room.result?.roles.secretHolder.id, ally.id);
+});
+
+test("なかまの『みぬく』は勝敗を決めず本人だけへ結果を知らせる", () => {
+  const room = playingRoom(5);
+  const [ally, holder, third] = room.players;
+  ally.isAlly = true;
+  ally.hand = [card("deduce")];
+  holder.hand = [card("secret"), card("peek")];
+  third.hand = [card("deduce")];
+  room.players.slice(3).forEach((player) => { player.hand = [card("rumor")]; });
+  playCard(room, ally.id, ally.hand[0].instanceId);
+  const outcome = submitAction(room, ally.id, room.pending!.id, holder.id);
+  assert.equal(room.status, "playing");
+  assert.equal(outcome.notices.length, 1);
+  assert.equal(outcome.notices[0].playerId, ally.id);
+  assert.match(outcome.notices[0].message ?? "", /保持者/);
+});
+
+test("事件発表前は配札せず、発見者の発表後にその人から始まる", () => {
+  const room = createRoom("ABC234", "ホスト", "socket-0");
+  addPlayer(room, "二人目", "socket-1");
+  addPlayer(room, "三人目", "socket-2");
+  startGame(room, room.hostId, () => 0.6);
+  const finderId = room.firstFinderId!;
+  assert.equal(room.status, "incident");
+  assert.equal(room.players.every((player) => player.hand.length === 0), true);
+  assert.throws(() => submitIncident(room, room.players.find((player) => player.id !== finderId)!.id, "横取り"), /発見者/);
+  submitIncident(room, finderId, "青いペンが消えた", () => 0.3);
+  assert.equal(room.status, "playing");
+  assert.equal(room.players[room.turnIndex].id, finderId);
+  assert.equal(room.players.every((player) => player.hand.length === 4), true);
+});
+
+test("再戦では別の発見者を選び、なかま状態をリセットする", () => {
+  const room = playingRoom(5);
+  const previous = room.firstFinderId!;
+  room.players[0].isAlly = true;
+  room.status = "finished";
+  startGame(room, room.hostId, () => 0);
+  assert.notEqual(room.firstFinderId, previous);
+  assert.equal(room.players.every((player) => !player.isAlly), true);
+});
+
+test("効果が成立するカードを任意に空打ちすることはできない", () => {
+  const room = playingRoom();
+  room.players[0].hand = [card("peek")];
+  room.players[1].hand = [card("secret"), card("rumor")];
+  room.players[2].hand = [card("deduce")];
+  playCard(room, room.players[0].id, room.players[0].hand[0].instanceId);
+  assert.equal(room.pending?.kind, "target");
+  assert.throws(() => submitAction(room, room.players[0].id, room.pending!.id, "confirm"), /選択/);
+});
+
+test("3〜8人の全構成が進行不能にならず最後まで完了する", () => {
+  for (let count = 3; count <= 8; count += 1) {
+    const room = playingRoom(count);
+    let steps = 0;
+    while (room.status === "playing" && steps < count * 20) {
+      steps += 1;
+      if (!room.pending) {
+        const actor = room.players[room.turnIndex];
+        const playable = actor.hand.find((item) => item.type !== "secret");
+        if (!playable) throw new Error(`${count}人: 手番に使えるカードがありません`);
+        playCard(room, actor.id, playable.instanceId, () => 0.2);
+        continue;
+      }
+      const pending = room.pending;
+      if (pending.kind === "no-effect") {
+        submitAction(room, pending.actorId, pending.id, "confirm", () => 0.2);
+      } else if (pending.kind === "target") {
+        submitAction(room, pending.actorId, pending.id, pending.allowedTargetIds[0], () => 0.2);
+      } else if (pending.kind === "recall") {
+        submitAction(room, pending.actorId, pending.id, pending.allowedRecordIds[0], () => 0.2);
+      } else if (pending.kind === "share-actor-card") {
+        submitAction(room, pending.actorId, pending.id, room.players.find((player) => player.id === pending.actorId)!.hand[0].instanceId, () => 0.2);
+      } else if (pending.kind === "share-target-card") {
+        submitAction(room, pending.targetId, pending.id, room.players.find((player) => player.id === pending.targetId)!.hand[0].instanceId, () => 0.2);
+      } else if (pending.kind === "rotate") {
+        for (const player of room.players) {
+          const current = room.pending;
+          if (!current || current.kind !== "rotate") break;
+          if (current.selections[player.id] === undefined) submitAction(room, player.id, current.id, player.hand[0].instanceId, () => 0.2);
+        }
+      }
+    }
+    assert.equal(room.status, "finished", `${count}人ゲームが完了しませんでした`);
+  }
 });

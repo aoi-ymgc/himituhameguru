@@ -16,7 +16,8 @@
     "start": "node dist/server/server/src/index.js",
     "test": "npm run test:unit && npm run test:integration",
     "test:unit": "tsx --test server/src/game.test.ts",
-    "test:integration": "npm run build && tsx --test server/src/socket.integration.test.ts"
+    "test:integration": "npm run build && tsx --test server/src/socket.integration.test.ts",
+    "simulate:balance": "tsx server/src/balance.simulation.ts"
   },
   "dependencies": {
     "express": "^5.1.0",
